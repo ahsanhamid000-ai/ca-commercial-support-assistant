@@ -1,6 +1,6 @@
 import logging
 import os
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from config import Config
@@ -17,7 +17,7 @@ from utils.db_helper import (
 )
 from utils.summarizer import generate_summary
 from utils.extractor import extract_key_information
-from utils.report_generator import build_report_data
+from utils.report_generator import build_report_data, build_report_pdf
 from utils.qa_engine import answer_question
 
 logging.basicConfig(level=logging.INFO)
@@ -172,6 +172,23 @@ def create_app() -> Flask:
 
         report_data = build_report_data(document)
         return render_template("report.html", report=report_data, document=document)
+
+    @app.route("/report/<int:doc_id>/download", methods=["GET"])
+    def download_report(doc_id: int):
+        document = get_document(app.config["DATABASE_PATH"], doc_id)
+        if not document:
+            return render_template("error.html", message="Document not found."), 404
+
+        report_data = build_report_data(document)
+        pdf_buffer = build_report_pdf(report_data)
+        download_name = f"report_{doc_id}.pdf"
+
+        return send_file(
+            pdf_buffer,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="application/pdf",
+        )
 
     return app
 
