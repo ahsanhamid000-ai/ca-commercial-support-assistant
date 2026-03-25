@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
-from utils.qa_engine import answer_question
-
 # Optional project helpers. This app can adapt to a few common function names.
 from utils import cleaner as cleaner_utils
 from utils import extractor as extractor_utils
