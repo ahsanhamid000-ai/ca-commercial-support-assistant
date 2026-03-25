@@ -16,9 +16,47 @@
 
 <section class="card">
     <h3>Extracted Information</h3>
-    <p><strong>Dates:</strong> {{ document.extracted_info.dates|join(', ') if document.extracted_info.dates else 'None' }}</p>
-    <p><strong>Emails:</strong> {{ document.extracted_info.emails|join(', ') if document.extracted_info.emails else 'None' }}</p>
-    <p><strong>Amounts:</strong> {{ document.extracted_info.amounts|join(', ') if document.extracted_info.amounts else 'None' }}</p>
+
+    <p><strong>Dates:</strong></p>
+    <ul>
+        {% for item in document.extracted_info.dates %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>None found.</li>
+        {% endfor %}
+    </ul>
+
+    <p><strong>Emails:</strong></p>
+    <ul>
+        {% for item in document.extracted_info.emails %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>None found.</li>
+        {% endfor %}
+    </ul>
+
+    <p><strong>Amounts:</strong></p>
+    <ul>
+        {% for item in document.extracted_info.amounts %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>None found.</li>
+        {% endfor %}
+    </ul>
+
+    <p><strong>Action Items:</strong></p>
+    <ul>
+        {% for item in document.extracted_info.action_items %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>No action items found.</li>
+        {% endfor %}
+    </ul>
+</section>
+
+<section class="card">
+    <h3>Document Preview</h3>
+    <p>{{ document.cleaned_text[:1200] }}{% if document.cleaned_text|length > 1200 %}...{% endif %}</p>
 </section>
 
 <section class="actions">
