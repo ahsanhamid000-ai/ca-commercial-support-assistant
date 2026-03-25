@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Generated Report{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h2>Structured Report</h2>
+    <p><strong>Document:</strong> {{ report.document_name }}</p>
+    <p><strong>Type:</strong> {{ report.document_type|upper }}</p>
+</section>
+
+<section class="card">
+    <h3>Summary</h3>
+    <p>{{ report.summary }}</p>
+</section>
+
+<section class="card">
+    <h3>Dates</h3>
+    <ul>
+        {% for item in report.dates %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>No dates found.</li>
+        {% endfor %}
+    </ul>
+
+    <h3>Emails</h3>
+    <ul>
+        {% for item in report.emails %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>No emails found.</li>
+        {% endfor %}
+    </ul>
+
+    <h3>Amounts</h3>
+    <ul>
+        {% for item in report.amounts %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>No amounts found.</li>
+        {% endfor %}
+    </ul>
+
+    <h3>Action Items</h3>
+    <ul>
+        {% for item in report.action_items %}
+            <li>{{ item }}</li>
+        {% else %}
+            <li>No action items found.</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endblock %}
