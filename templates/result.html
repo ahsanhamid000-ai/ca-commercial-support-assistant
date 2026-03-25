@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Document Result{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h2>Document Processed</h2>
+    <p><strong>File Name:</strong> {{ document.file_name }}</p>
+    <p><strong>Type:</strong> {{ document.file_type|upper }}</p>
+</section>
+
+<section class="card">
+    <h3>Executive Summary</h3>
+    <p>{{ document.summary }}</p>
+</section>
+
+<section class="card">
+    <h3>Extracted Information</h3>
+    <p><strong>Dates:</strong> {{ document.extracted_info.dates|join(', ') if document.extracted_info.dates else 'None' }}</p>
+    <p><strong>Emails:</strong> {{ document.extracted_info.emails|join(', ') if document.extracted_info.emails else 'None' }}</p>
+    <p><strong>Amounts:</strong> {{ document.extracted_info.amounts|join(', ') if document.extracted_info.amounts else 'None' }}</p>
+</section>
+
+<section class="actions">
+    <a class="button" href="{{ url_for('chat', doc_id=document.id) }}">Open Chat Assistant</a>
+    <a class="button secondary" href="{{ url_for('report', doc_id=document.id) }}">View Report</a>
+</section>
+{% endblock %}
