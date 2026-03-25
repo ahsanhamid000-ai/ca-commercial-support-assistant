@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Document{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h2>Upload a Commercial Document</h2>
+    <p>Supported file types: PDF, DOCX, TXT</p>
+
+    <form action="{{ url_for('upload') }}" method="POST" enctype="multipart/form-data">
+        <input type="file" name="document" required>
+        <button type="submit">Upload and Process</button>
+    </form>
+</section>
+{% endblock %}
