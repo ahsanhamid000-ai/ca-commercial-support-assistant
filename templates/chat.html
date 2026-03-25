@@ -7,20 +7,47 @@
     <h2>Ask Questions About: {{ document.file_name }}</h2>
     <p>Ask only document-related questions.</p>
 
+    <div class="card" style="margin-top: 16px;">
+        <h3>Example Questions</h3>
+        <ul>
+            <li>What is the main purpose of this document?</li>
+            <li>Are any deadlines mentioned?</li>
+            <li>What action items are listed?</li>
+            <li>Who is responsible for approval?</li>
+            <li>Summarize the important points.</li>
+        </ul>
+    </div>
+
     <div id="chat-history" class="chat-history">
-        {% for item in chat_history %}
-            <div class="chat-message user">
-                <strong>You:</strong> {{ item.user_question }}
-            </div>
+        {% if chat_history %}
+            {% for item in chat_history %}
+                <div class="chat-message user">
+                    <strong>You:</strong> {{ item.user_question }}
+                </div>
+                <div class="chat-message assistant">
+                    <strong>Assistant:</strong> {{ item.chatbot_answer }}
+                </div>
+            {% endfor %}
+        {% else %}
             <div class="chat-message assistant">
-                <strong>Assistant:</strong> {{ item.chatbot_answer }}
+                <strong>Assistant:</strong> No questions asked yet. Start by typing a question below.
             </div>
-        {% endfor %}
+        {% endif %}
+    </div>
+
+    <div id="chat-status" style="display: none; margin-bottom: 12px;">
+        Processing your question...
     </div>
 
     <form id="chat-form" action="{{ url_for('ask', doc_id=document.id) }}" method="POST">
-        <textarea name="question" id="question" rows="4" placeholder="Ask a question..." required></textarea>
-        <button type="submit">Send</button>
+        <textarea
+            name="question"
+            id="question"
+            rows="4"
+            placeholder="Ask a question about this document..."
+            required
+        ></textarea>
+        <button type="submit" id="send-button">Send</button>
     </form>
 </section>
 {% endblock %}
