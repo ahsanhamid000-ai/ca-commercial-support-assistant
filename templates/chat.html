@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Chat Assistant{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h2>Ask Questions About: {{ document.file_name }}</h2>
+    <p>Ask only document-related questions.</p>
+
+    <div id="chat-history" class="chat-history">
+        {% for item in chat_history %}
+            <div class="chat-message user">
+                <strong>You:</strong> {{ item.user_question }}
+            </div>
+            <div class="chat-message assistant">
+                <strong>Assistant:</strong> {{ item.chatbot_answer }}
+            </div>
+        {% endfor %}
+    </div>
+
+    <form id="chat-form" action="{{ url_for('ask', doc_id=document.id) }}" method="POST">
+        <textarea name="question" id="question" rows="4" placeholder="Ask a question..." required></textarea>
+        <button type="submit">Send</button>
+    </form>
+</section>
+{% endblock %}
