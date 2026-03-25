@@ -9,6 +9,12 @@
     <p><strong>Type:</strong> {{ report.document_type|upper }}</p>
 </section>
 
+<section class="actions">
+    <a class="button secondary" href="{{ url_for('download_report', doc_id=document.id) }}">
+        Download PDF Report
+    </a>
+</section>
+
 <section class="card">
     <h3>Summary</h3>
     <p>{{ report.summary }}</p>
@@ -50,5 +56,10 @@
             <li>No action items found.</li>
         {% endfor %}
     </ul>
+</section>
+
+<section class="card">
+    <h3>Document Preview</h3>
+    <p>{{ report.preview }}</p>
 </section>
 {% endblock %}
