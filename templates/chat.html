@@ -1,53 +1,285 @@
 {% extends "base.html" %}
 
-{% block title %}Chat Assistant{% endblock %}
-
 {% block content %}
-<section class="card">
-    <h2>Ask Questions About: {{ document.file_name }}</h2>
-    <p>Ask only document-related questions.</p>
+<style>
+    .chat-shell {
+        max-width: 860px;
+        margin: 30px auto;
+    }
 
-    <div class="card" style="margin-top: 16px;">
-        <h3>Example Questions</h3>
-        <ul>
-            <li>What is the main purpose of this document?</li>
-            <li>Are any deadlines mentioned?</li>
-            <li>What action items are listed?</li>
-            <li>Who is responsible for approval?</li>
-            <li>Summarize the important points.</li>
-        </ul>
-    </div>
+    .chat-card {
+        background: #ffffff;
+        border-radius: 14px;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.08);
+        padding: 24px;
+    }
 
-    <div id="chat-history" class="chat-history">
-        {% if chat_history %}
-            {% for item in chat_history %}
-                <div class="chat-message user">
-                    <strong>You:</strong> {{ item.user_question }}
+    .chat-subtitle {
+        color: #555;
+        margin-top: 6px;
+        margin-bottom: 18px;
+    }
+
+    .chat-history {
+        max-height: 420px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 14px;
+        background: #fafafa;
+        margin-bottom: 18px;
+    }
+
+    .message {
+        margin-bottom: 12px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+    }
+
+    .message.user {
+        background: #e8eefc;
+    }
+
+    .message.assistant {
+        background: #eef7ea;
+    }
+
+    .source-badge {
+        display: inline-block;
+        margin-left: 8px;
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #203864;
+        color: white;
+    }
+
+    .custom-box {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 16px;
+        background: #fcfcfc;
+        margin-bottom: 18px;
+        display: none;
+    }
+
+    .custom-box.active {
+        display: block;
+    }
+
+    .custom-box textarea,
+    .custom-box select {
+        width: 100%;
+        padding: 10px 12px;
+        margin-top: 8px;
+        margin-bottom: 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 14px;
+    }
+
+    .action-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .primary-btn,
+    .secondary-btn,
+    .danger-btn,
+    .prompt-btn {
+        border: none;
+        border-radius: 8px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .primary-btn {
+        background: #203864;
+        color: white;
+    }
+
+    .secondary-btn {
+        background: #e5e7eb;
+        color: #111827;
+    }
+
+    .danger-btn {
+        background: #b42318;
+        color: white;
+    }
+
+    .prompt-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+    }
+
+    .prompt-btn {
+        background: #f3f4f6;
+        color: #111827;
+        text-align: left;
+        min-height: 58px;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 9999;
+    }
+
+    .modal-overlay.show {
+        display: flex;
+    }
+
+    .modal-card {
+        width: 100%;
+        max-width: 760px;
+        background: white;
+        border-radius: 14px;
+        padding: 22px;
+        box-shadow: 0 12px 35px rgba(0, 0, 0, 0.20);
+    }
+
+    .modal-card h3 {
+        margin-top: 0;
+    }
+
+    .modal-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 18px;
+    }
+
+    .hidden-form {
+        display: none;
+    }
+
+    .helper-text {
+        color: #6b7280;
+        font-size: 13px;
+        margin-top: 4px;
+    }
+</style>
+
+<div class="chat-shell" data-show-next-step="{{ 1 if show_next_step else 0 }}">
+    <div class="chat-card">
+        <h2>Ask Questions About: {{ document_name }}</h2>
+        <p class="chat-subtitle">
+            Choose from guided popup prompts or ask a custom question.
+        </p>
+
+        <div class="chat-history" id="chatHistory">
+            {% if not chat_history %}
+                <div class="message assistant">
+                    <strong>Assistant:</strong> No questions asked yet. Please choose a question from the popup list.
                 </div>
-                <div class="chat-message assistant">
-                    <strong>Assistant:</strong> {{ item.chatbot_answer }}
+            {% endif %}
+
+            {% for item in chat_history %}
+                <div class="message user">
+                    <strong>You:</strong> {{ item.question }}
+                </div>
+
+                <div class="message assistant">
+                    <strong>Assistant:</strong>
+                    {% if item.source %}
+                        <span class="source-badge">{{ item.source }}</span>
+                    {% endif %}
+                    <div>{{ item.answer }}</div>
                 </div>
             {% endfor %}
-        {% else %}
-            <div class="chat-message assistant">
-                <strong>Assistant:</strong> No questions asked yet. Start by typing a question below.
-            </div>
-        {% endif %}
-    </div>
+        </div>
 
-    <div id="chat-status" style="display: none; margin-bottom: 12px;">
-        Processing your question...
-    </div>
+        <div id="customQuestionBox" class="custom-box">
+            <form method="POST">
+                <input type="hidden" name="question_mode" value="custom">
 
-    <form id="chat-form" action="{{ url_for('ask', doc_id=document.id) }}" method="POST">
-        <textarea
-            name="question"
-            id="question"
-            rows="4"
-            placeholder="Ask a question about this document..."
-            required
-        ></textarea>
-        <button type="submit" id="send-button">Send</button>
-    </form>
-</section>
+                <label for="question"><strong>Type your custom question</strong></label>
+                <textarea name="question" id="question" rows="4" placeholder="Type any question here..."></textarea>
+
+                <label for="fallback_mode"><strong>Choose answer source</strong></label>
+                <select name="fallback_mode" id="fallback_mode">
+                    <option value="document_then_openai">Check document first, then use OpenAI</option>
+                    <option value="document_then_google">Check document first, then search Google</option>
+                    <option value="openai_only">Use OpenAI only</option>
+                    <option value="google_only">Use Google only</option>
+                </select>
+
+                <p class="helper-text">
+                    For custom questions, the app can answer from the uploaded document first or use OpenAI / Google.
+                </p>
+
+                <div class="action-row">
+                    <button type="submit" class="primary-btn">Ask Custom Question</button>
+                    <button type="button" class="secondary-btn" id="hideCustomBoxBtn">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="action-row">
+            <button type="button" class="primary-btn" id="openQuestionModalBtn">Choose from Question List</button>
+            <button type="button" class="secondary-btn" id="showCustomBoxBtn">Ask a Custom Question</button>
+
+            <form method="POST" id="exitForm">
+                <input type="hidden" name="action" value="exit">
+                <button type="submit" class="danger-btn">Exit</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<form method="POST" id="presetQuestionForm" class="hidden-form">
+    <input type="hidden" name="question" id="presetQuestionInput">
+    <input type="hidden" name="question_mode" value="preset">
+    <input type="hidden" name="fallback_mode" value="document_only">
+</form>
+
+<div class="modal-overlay" id="questionModal">
+    <div class="modal-card">
+        <h3>Select a Question</h3>
+        <p>Please pick one of the guided questions below.</p>
+
+        <div class="prompt-grid">
+            {% for q in preset_questions %}
+                <button type="button" class="prompt-btn preset-question-btn" data-question="{{ q }}">{{ q }}</button>
+            {% endfor %}
+        </div>
+
+        <div class="modal-actions">
+            <button type="button" class="secondary-btn" id="openCustomFromModalBtn">Ask a Custom Question</button>
+            <button type="button" class="danger-btn" id="modalExitBtn">Exit</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="nextStepModal">
+    <div class="modal-card">
+        <h3>What would you like to do next?</h3>
+        <p>Please choose another question or exit the program.</p>
+
+        <div class="modal-actions">
+            <button type="button" class="primary-btn" id="askAnotherBtn">Select Another Question</button>
+            <button type="button" class="secondary-btn" id="askCustomAfterAnswerBtn">Ask a Custom Question</button>
+            <button type="button" class="danger-btn" id="nextStepExitBtn">Exit</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.CHAT_PAGE_STATE = {
+        showNextStep: {{ 1 if show_next_step else 0 }}
+    };
+</script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}
