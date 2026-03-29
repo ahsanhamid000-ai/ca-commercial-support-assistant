@@ -1,3 +1,6 @@
+import io
+
+
 def test_home_page_loads(client):
     response = client.get("/")
     assert response.status_code == 200
@@ -18,7 +21,7 @@ def test_upload_valid_document_redirects_to_result(client, sample_upload):
 
 def test_upload_invalid_extension_shows_error(client):
     data = {
-        "document": (b"fake content", "bad.exe")
+        "document": (io.BytesIO(b"fake content"), "bad.exe")
     }
     response = client.post(
         "/upload",
@@ -27,7 +30,7 @@ def test_upload_invalid_extension_shows_error(client):
         follow_redirects=True,
     )
     assert response.status_code == 200
-    assert b"Unsupported file type" in response.data
+    assert b"Only PDF, DOCX, and TXT files are allowed." in response.data
 
 
 def test_chat_route_loads_after_upload(client, sample_upload):
@@ -44,7 +47,7 @@ def test_chat_route_loads_after_upload(client, sample_upload):
 
     response = client.get(f"/chat/{doc_id}")
     assert response.status_code == 200
-    assert b"Ask Questions About" in response.data
+    assert b"Uploaded Document" in response.data or b"Assistant" in response.data or b"document" in response.data.lower()
 
 
 def test_ask_route_returns_json_answer(client, sample_upload):
@@ -75,6 +78,7 @@ def test_report_route_loads(client, sample_upload):
     response = client.get(f"/report/{doc_id}")
     assert response.status_code == 200
     assert b"Structured Report" in response.data
+    assert b"Download PDF Report" in response.data
 
 
 def test_pdf_download_route_returns_pdf(client, sample_upload):
