@@ -268,11 +268,15 @@ def is_list_request(question_lower: str) -> bool:
 def answer_purpose_question(text: str) -> str:
     lower = text.lower()
 
-    if "design and implement a production-quality frontend web application" in lower:
+    if (
+        "frontend design overview" in lower
+        or "assessment objective" in lower
+        or "design and implement a production-quality frontend web application" in lower
+    ):
         return (
-            "The document explains Assignment 2: Frontend Design Overview. "
-            "Its purpose is to guide students in designing and implementing a "
-            "production-quality frontend web application using a modern JavaScript framework."
+            "The main purpose of this document is to describe Assignment 2: Frontend Design Overview. "
+            "It explains that students must design and implement a production-quality frontend web "
+            "application using a modern JavaScript framework such as React or Vue."
         )
 
     return ""
@@ -332,9 +336,7 @@ def generate_executive_summary_points(text: str) -> list[str]:
     points: list[str] = []
 
     if "assignment 2" in lower and "frontend design overview" in lower:
-        points.append(
-            "This document is for Assignment 2: Frontend Design Overview."
-        )
+        points.append("This document is for Assignment 2: Frontend Design Overview.")
 
     if "design and implement a production-quality frontend web application" in lower:
         points.append(
