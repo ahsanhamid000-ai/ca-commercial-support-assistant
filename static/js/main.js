@@ -21,7 +21,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const submitCustomQuestionBtn = document.getElementById("submitCustomQuestionBtn");
 
     const questionInput = document.getElementById("questionInput");
-    const fallbackMode = document.getElementById("fallbackMode");
     const presetButtons = document.querySelectorAll(".preset-question-btn");
 
     function openModal(modal) {
@@ -76,7 +75,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    function createMessageBubble(role, text, source = "") {
+    function createMessageBubble(role, text) {
         const wrapper = document.createElement("div");
         wrapper.className = `message ${role}`;
 
@@ -87,13 +86,6 @@ document.addEventListener("DOMContentLoaded", function () {
         label.textContent = role === "user" ? "You:" : "Assistant:";
         meta.appendChild(label);
 
-        if (role === "assistant" && source) {
-            const badge = document.createElement("span");
-            badge.className = "source-badge";
-            badge.textContent = source;
-            meta.appendChild(badge);
-        }
-
         const body = document.createElement("div");
         body.textContent = text;
 
@@ -103,19 +95,16 @@ document.addEventListener("DOMContentLoaded", function () {
         return wrapper;
     }
 
-    function appendConversation(question, answer, source = "") {
+    function appendConversation(question, answer) {
         if (!chatHistory) return;
 
-        const initialPlaceholder = chatHistory.querySelector(".message.assistant");
-        if (initialPlaceholder && chatHistory.children.length === 1) {
-            const content = initialPlaceholder.textContent || "";
-            if (content.includes("Please choose a question from the popup list")) {
-                chatHistory.innerHTML = "";
-            }
+        const initialMessage = document.getElementById("initialAssistantMessage");
+        if (initialMessage) {
+            initialMessage.remove();
         }
 
         chatHistory.appendChild(createMessageBubble("user", question));
-        chatHistory.appendChild(createMessageBubble("assistant", answer, source));
+        chatHistory.appendChild(createMessageBubble("assistant", answer));
         scrollHistoryToBottom();
     }
 
@@ -126,13 +115,9 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    async function askQuestion(question, questionMode, selectedFallbackMode) {
+    async function askQuestion(question) {
         if (!askUrl) {
-            appendConversation(
-                question,
-                "The chatbot endpoint is not configured correctly.",
-                ""
-            );
+            appendConversation(question, "The chatbot endpoint is not configured correctly.");
             return;
         }
 
@@ -142,8 +127,6 @@ document.addEventListener("DOMContentLoaded", function () {
         try {
             const formData = new FormData();
             formData.append("question", question);
-            formData.append("question_mode", questionMode);
-            formData.append("fallback_mode", selectedFallbackMode || "document_then_openai");
 
             const response = await fetch(askUrl, {
                 method: "POST",
@@ -157,7 +140,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
             if (!response.ok || !data.success) {
                 const errorMessage = data.message || "The chatbot could not answer right now.";
-                appendConversation(question, errorMessage, "");
+                appendConversation(question, errorMessage);
                 closeModal(questionModal);
                 closeModal(nextStepModal);
                 return;
@@ -165,15 +148,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
             appendConversation(
                 data.question || question,
-                data.answer || "No answer returned.",
-                data.source || ""
+                data.answer || "No answer returned."
             );
 
             hideCustomQuestionBox();
             closeModal(questionModal);
             openModal(nextStepModal);
         } catch (error) {
-            appendConversation(question, "A network or server error occurred. Please try again.", "");
+            appendConversation(question, "A network or server error occurred. Please try again.");
             closeModal(questionModal);
             closeModal(nextStepModal);
         } finally {
@@ -191,7 +173,7 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.addEventListener("click", function () {
                 const question = btn.getAttribute("data-question") || "";
                 if (question.trim()) {
-                    askQuestion(question, "preset", "document_only");
+                    askQuestion(question);
                 }
             });
         });
@@ -200,7 +182,6 @@ document.addEventListener("DOMContentLoaded", function () {
     if (submitCustomQuestionBtn) {
         submitCustomQuestionBtn.addEventListener("click", function () {
             const question = (questionInput && questionInput.value ? questionInput.value : "").trim();
-            const mode = fallbackMode ? fallbackMode.value : "document_then_openai";
 
             if (!question) {
                 showStatus("Please type a custom question first.");
@@ -208,7 +189,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
 
-            askQuestion(question, "custom", mode);
+            askQuestion(question);
         });
     }
 
