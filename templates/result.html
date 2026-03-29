@@ -1,66 +1,187 @@
 {% extends "base.html" %}
 
-{% block title %}Document Result{% endblock %}
+{% block title %}Document Processed - CA Commercial Support Assistant{% endblock %}
 
 {% block content %}
-<section class="card">
-    <h2>Document Processed</h2>
-    <p><strong>File Name:</strong> {{ document.file_name }}</p>
-    <p><strong>Type:</strong> {{ document.file_type|upper }}</p>
-</section>
+<style>
+    body {
+        background: #f4f5f8;
+    }
 
-<section class="card">
-    <h3>Executive Summary</h3>
-    <p>{{ document.summary }}</p>
-</section>
+    main.container {
+        width: 100%;
+        max-width: 100%;
+    }
 
-<section class="card">
-    <h3>Extracted Information</h3>
+    .result-page {
+        width: 100%;
+        max-width: 1100px;
+        margin: 28px auto 40px;
+        padding: 0 24px;
+    }
 
-    <p><strong>Dates:</strong></p>
-    <ul>
-        {% for item in document.extracted_info.dates %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>None found.</li>
-        {% endfor %}
-    </ul>
+    .result-card {
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+        padding: 28px 26px;
+    }
 
-    <p><strong>Emails:</strong></p>
-    <ul>
-        {% for item in document.extracted_info.emails %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>None found.</li>
-        {% endfor %}
-    </ul>
+    .result-title {
+        margin: 0 0 18px;
+        font-size: 36px;
+        font-weight: 800;
+        color: #1f2a44;
+        line-height: 1.15;
+    }
 
-    <p><strong>Amounts:</strong></p>
-    <ul>
-        {% for item in document.extracted_info.amounts %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>None found.</li>
-        {% endfor %}
-    </ul>
+    .result-subtitle {
+        margin: 0 0 24px;
+        font-size: 15px;
+        color: #6b7280;
+    }
 
-    <p><strong>Action Items:</strong></p>
-    <ul>
-        {% for item in document.extracted_info.action_items %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>No action items found.</li>
-        {% endfor %}
-    </ul>
-</section>
+    .doc-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-bottom: 26px;
+    }
 
-<section class="card">
-    <h3>Document Preview</h3>
-    <p>{{ document.cleaned_text[:1200] }}{% if document.cleaned_text|length > 1200 %}...{% endif %}</p>
-</section>
+    .doc-meta {
+        background: #f8faff;
+        border: 1px solid #e7ecf7;
+        border-radius: 16px;
+        padding: 18px;
+    }
 
-<section class="actions">
-    <a class="button" href="{{ url_for('chat', doc_id=document.id) }}">Open Chat Assistant</a>
-    <a class="button secondary" href="{{ url_for('report', doc_id=document.id) }}">View Report</a>
-</section>
+    .meta-label {
+        font-size: 12px;
+        font-weight: 800;
+        color: #51638f;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+    }
+
+    .meta-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: #111827;
+        word-break: break-word;
+    }
+
+    .summary-box {
+        background: #f9fafc;
+        border: 1px solid #e7eaf1;
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 26px;
+    }
+
+    .section-title {
+        margin: 0 0 12px;
+        font-size: 20px;
+        font-weight: 800;
+        color: #1f2a44;
+    }
+
+    .summary-text {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.7;
+        color: #374151;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .action-row {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+    }
+
+    .primary-btn,
+    .secondary-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 14px;
+        padding: 13px 20px;
+        font-size: 15px;
+        font-weight: 700;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.18s ease;
+    }
+
+    .primary-btn {
+        background: linear-gradient(135deg, #2d4680 0%, #284170 100%);
+        color: #ffffff;
+    }
+
+    .primary-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 20px rgba(40, 65, 112, 0.22);
+    }
+
+    .secondary-btn {
+        background: #e9edff;
+        color: #284170;
+    }
+
+    .secondary-btn:hover {
+        background: #dde5ff;
+        transform: translateY(-1px);
+    }
+
+    @media (max-width: 760px) {
+        .result-title {
+            font-size: 28px;
+        }
+
+        .doc-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .result-card {
+            padding: 22px 18px;
+        }
+    }
+</style>
+
+<div class="result-page">
+    <div class="result-card">
+        <h1 class="result-title">Document Processed</h1>
+        <p class="result-subtitle">Your commercial document has been uploaded and processed successfully.</p>
+
+        <div class="doc-grid">
+            <div class="doc-meta">
+                <div class="meta-label">File Name</div>
+                <div class="meta-value">{{ document.file_name }}</div>
+            </div>
+
+            <div class="doc-meta">
+                <div class="meta-label">Type</div>
+                <div class="meta-value">
+                    {{ document.file_name.split('.')[-1].upper() if document.file_name and '.' in document.file_name else 'Document' }}
+                </div>
+            </div>
+        </div>
+
+        <div class="summary-box">
+            <h2 class="section-title">Executive Summary</h2>
+            <p class="summary-text">
+                {{ summary if summary else "The document was processed successfully and is ready for report viewing or chatbot interaction." }}
+            </p>
+        </div>
+
+        <div class="action-row">
+            <a href="{{ url_for('chat', document_id=document.id) }}" class="primary-btn">Use Chatbot</a>
+            <a href="{{ url_for('report', document_id=document.id) }}" class="secondary-btn">View Report</a>
+        </div>
+    </div>
+</div>
 {% endblock %}
