@@ -16,16 +16,22 @@
         background: #f4f5f8;
     }
 
+    main.container {
+        width: 100%;
+        max-width: 100%;
+    }
+
     .widget-page {
+        width: 100%;
         min-height: calc(100vh - 90px);
         display: flex;
         justify-content: center;
-        align-items: center;
-        padding: 32px;
+        align-items: flex-start;
+        padding: 28px 24px 32px;
     }
 
     .chat-widget {
-        width: min(94vw, 980px);
+        width: min(96vw, 1180px);
         height: 780px;
         background: #ffffff;
         border-radius: 32px;
@@ -36,43 +42,30 @@
         position: relative;
     }
 
-    .chat-header {
-        background: linear-gradient(180deg, #2d4680 0%, #284170 100%);
-        color: white;
-        padding: 22px 26px 18px;
-        position: relative;
+    .chat-top-strip {
+        padding: 20px 22px 16px;
+        border-bottom: 1px solid #e9edf6;
+        background: linear-gradient(180deg, #f8faff 0%, #f2f5ff 100%);
     }
 
-    .chat-header-top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 16px;
-    }
-
-    .chat-header-title {
-        font-size: 18px;
-        font-weight: 700;
-        line-height: 1.2;
-        max-width: 420px;
-    }
-
-    .chat-header-home {
-        color: white;
-        text-decoration: none;
-        font-size: 14px;
-        font-weight: 600;
+    .doc-label {
+        font-size: 12px;
+        font-weight: 800;
+        color: #3d528c;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
     }
 
     .agent-pill {
-        background: rgba(255, 255, 255, 0.18);
-        backdrop-filter: blur(10px);
+        background: linear-gradient(135deg, #2d4680 0%, #284170 100%);
         border-radius: 999px;
         padding: 12px 18px;
         display: inline-flex;
         align-items: center;
         gap: 12px;
-        max-width: 460px;
+        max-width: 560px;
+        color: white;
     }
 
     .agent-avatar {
@@ -98,6 +91,7 @@
     .agent-name {
         font-size: 16px;
         font-weight: 700;
+        line-height: 1.2;
     }
 
     .agent-status {
@@ -274,8 +268,9 @@
     .powered-by {
         text-align: center;
         font-size: 11px;
-        color: #9ca3af;
+        color: #7b8598;
         margin-top: 8px;
+        font-weight: 600;
     }
 
     .modal-overlay {
@@ -409,11 +404,6 @@
             max-width: 84%;
         }
 
-        .chat-header-title {
-            max-width: 210px;
-            font-size: 16px;
-        }
-
         .agent-pill {
             max-width: 100%;
         }
@@ -422,11 +412,8 @@
 
 <div class="widget-page">
     <div class="chat-widget">
-        <div class="chat-header">
-            <div class="chat-header-top">
-                <div class="chat-header-title">CA Commercial Support Assistant</div>
-                <a href="{{ url_for('index') }}" class="chat-header-home">Home</a>
-            </div>
+        <div class="chat-top-strip">
+            <div class="doc-label">Document Assistant</div>
 
             <div class="agent-pill">
                 <div class="agent-avatar">CA</div>
@@ -485,7 +472,7 @@
                 <button type="button" class="input-icon-btn" title="Info">＋</button>
                 <button type="button" class="send-btn" id="sendBtn" title="Send">➤</button>
             </div>
-            <div class="powered-by">Powered by your Flask chatbot</div>
+            <div class="powered-by">CA Commercial Support Assistant</div>
         </div>
 
         <div class="modal-overlay" id="promptModal">
@@ -514,5 +501,4 @@
         homeUrl: "{{ url_for('index') }}"
     };
 </script>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}
