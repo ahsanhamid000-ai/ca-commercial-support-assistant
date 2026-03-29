@@ -7,6 +7,7 @@ if (!window.__caChatWidgetInitialized) {
         const homeUrl = state.homeUrl || "/";
         const notFoundMessage =
             state.notFoundMessage || "The requested information was not found in the uploaded document.";
+        const aiFallbackEnabled = !!state.aiFallbackEnabled;
 
         const chatBody = document.getElementById("chatBody");
         const messageInput = document.getElementById("messageInput");
@@ -56,6 +57,10 @@ if (!window.__caChatWidgetInitialized) {
 
         function showUseAiButton(show) {
             if (!useAiBtn) return;
+            if (!aiFallbackEnabled) {
+                useAiBtn.classList.remove("show");
+                return;
+            }
             useAiBtn.classList.toggle("show", !!show);
         }
 
@@ -115,7 +120,7 @@ if (!window.__caChatWidgetInitialized) {
         function isDuplicateSubmission(question) {
             const now = Date.now();
             const sameQuestion = question === lastSubmittedQuestion;
-            const tooSoon = (now - lastSubmittedAt) < 1500;
+            const tooSoon = now - lastSubmittedAt < 1500;
             return sameQuestion && tooSoon;
         }
 
@@ -124,13 +129,24 @@ if (!window.__caChatWidgetInitialized) {
             lastSubmittedAt = Date.now();
         }
 
+        async function parseJsonSafely(response) {
+            const text = await response.text();
+            try {
+                return JSON.parse(text);
+            } catch (error) {
+                return {
+                    success: false,
+                    message: "The server returned an invalid response."
+                };
+            }
+        }
+
         async function askQuestion(question, options = {}) {
             const trimmed = (question || "").trim();
             const mode = options.mode === "ai" ? "ai" : "document";
             const echoUser = options.echoUser !== false;
 
             if (!trimmed) return;
-
             if (requestInFlight) return;
             if (mode === "document" && isDuplicateSubmission(trimmed)) return;
 
@@ -173,7 +189,7 @@ if (!window.__caChatWidgetInitialized) {
                     }
                 });
 
-                const data = await response.json();
+                const data = await parseJsonSafely(response);
 
                 if (!response.ok || !data.success) {
                     appendMessage("assistant", data.message || "The chatbot could not answer right now.");
@@ -188,7 +204,7 @@ if (!window.__caChatWidgetInitialized) {
                     mode === "document" &&
                     (data.not_found === true || answerText.trim() === notFoundMessage);
 
-                if (isNotFound) {
+                if (isNotFound && aiFallbackEnabled && data.ai_fallback_available) {
                     lastNotFoundQuestion = trimmed;
                     showUseAiButton(true);
                 } else {
@@ -206,20 +222,17 @@ if (!window.__caChatWidgetInitialized) {
             }
         }
 
-        if (presetButtons.length > 0) {
-            presetButtons.forEach((btn) => {
-                if (btn.dataset.bound === "1") return;
-                btn.dataset.bound = "1";
+        presetButtons.forEach((btn) => {
+            if (btn.dataset.bound === "1") return;
+            btn.dataset.bound = "1";
 
-                btn.addEventListener("click", function (event) {
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    const question = btn.getAttribute("data-question") || "";
-                    askQuestion(question, { mode: "document", echoUser: true });
-                });
+            btn.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                const question = btn.getAttribute("data-question") || "";
+                askQuestion(question, { mode: "document", echoUser: true });
             });
-        }
+        });
 
         if (sendBtn && sendBtn.dataset.bound !== "1") {
             sendBtn.dataset.bound = "1";
