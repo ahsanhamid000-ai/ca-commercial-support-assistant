@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 NOT_FOUND_MESSAGE = "The requested information was not found in the uploaded document."
 PROCESSING_ERROR_MESSAGE = "The uploaded document could not be processed correctly."
+AI_FALLBACK_UNAVAILABLE_MESSAGE = "AI fallback is not available right now."
+AI_FALLBACK_PREFIX = "AI-generated answer (not found directly in the uploaded document):"
 
 NOISY_PATTERNS = [
     r"readme\.md",
@@ -38,8 +40,6 @@ def answer_question(question: str, document_text: str, api_key: str | None = Non
         return "Please enter a question about the uploaded document."
 
     cleaned_document = sanitize_document_text(document_text)
-
-    # Direct intent-specific answers from the full cleaned document
     question_lower = question.lower()
 
     if is_purpose_request(question_lower):
@@ -110,21 +110,81 @@ def answer_question(question: str, document_text: str, api_key: str | None = Non
     return local_fallback_answer(question, context)
 
 
+def answer_with_ai_fallback(question: str, document_text: str, api_key: str | None = None) -> str:
+    question = normalize_whitespace(question)
+    document_text = normalize_whitespace(document_text)
+
+    if not question:
+        return "Please enter a question."
+
+    if not api_key:
+        return AI_FALLBACK_UNAVAILABLE_MESSAGE
+
+    cleaned_document = sanitize_document_text(document_text)
+    context = select_relevant_chunks(question, cleaned_document, top_k=5) if cleaned_document else ""
+    context_block = context if context.strip() else "No relevant document context was found."
+
+    prompt = (
+        "The uploaded document did not contain a direct answer to the user's question.\n\n"
+        f"Question:\n{question}\n\n"
+        "Potentially relevant document context:\n"
+        f"{context_block}\n\n"
+        f"Start the answer with exactly this line:\n{AI_FALLBACK_PREFIX}\n\n"
+        "Then provide a concise, helpful answer using general AI knowledge. "
+        "Do not claim the answer was found in the uploaded document. "
+        "If the context is useful, you may mention it briefly."
+    )
+
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            temperature=0.4,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant. "
+                        "The answer was not found directly in the uploaded document. "
+                        "Provide a concise and useful AI-generated answer."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+        )
+
+        if response.choices and response.choices[0].message:
+            answer = normalize_whitespace(response.choices[0].message.content or "")
+            if answer:
+                return answer
+    except Exception as exc:
+        logger.exception("OpenAI AI-fallback call failed: %s", exc)
+
+    return AI_FALLBACK_UNAVAILABLE_MESSAGE
+
+
 def sanitize_document_text(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("•", ". ")
     text = text.replace("·", ". ")
     text = re.sub(r"\s+", " ", text)
 
-    # Remove noisy labels and fragments
     for pattern in NOISY_PATTERNS:
         text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
 
-    # Remove duplicated "Detailed Assessment Brief" style noise
-    text = re.sub(r"(Detailed Assessment Brief\s*){2,}", "Detailed Assessment Brief ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(Detailed Assessment Brief\s*){2,}",
+        "Detailed Assessment Brief ",
+        text,
+        flags=re.IGNORECASE,
+    )
 
-    # Remove isolated metadata fragments
-    text = re.sub(r"\b(CIHE|MIT Semester|Semester 1,\s*2026|Unit Learning Outcomes Addressed\s*1,?3,?4)\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\b(CIHE|MIT Semester|Semester 1,\s*2026|Unit Learning Outcomes Addressed\s*1,?3,?4)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
 
     text = re.sub(r"\s+", " ", text)
     return text.strip()
