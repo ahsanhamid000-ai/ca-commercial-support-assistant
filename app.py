@@ -1,15 +1,14 @@
 import logging
-import os
 import re
 import sqlite3
 import time
 from io import BytesIO
 from pathlib import Path
 
-from dotenv import load_dotenv
 from flask import (
     Flask,
     abort,
+    current_app,
     flash,
     g,
     jsonify,
@@ -19,58 +18,38 @@ from flask import (
     send_file,
     url_for,
 )
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+from config import Config
 from utils.qa_engine import (
     NOT_FOUND_MESSAGE,
     answer_question,
     answer_with_ai_fallback,
-    extract_action_items,
     generate_executive_summary_points,
     sanitize_document_text,
 )
-
-BASE_DIR = Path(__file__).resolve().parent
-INSTANCE_DIR = BASE_DIR / "instance"
-UPLOAD_FOLDER = BASE_DIR / "uploads"
-DATABASE_PATH = INSTANCE_DIR / "assistant.db"
-
-ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024
-
-load_dotenv()
-
-app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-this-secret-key")
-app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
-app.config["DATABASE_PATH"] = str(DATABASE_PATH)
-app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+from utils.report_generator import build_report_data, build_report_pdf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
-INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
-        conn = sqlite3.connect(app.config["DATABASE_PATH"])
+        conn = sqlite3.connect(current_app.config["DATABASE_PATH"])
         conn.row_factory = sqlite3.Row
         g.db = conn
     return g.db
 
 
-@app.teardown_appcontext
-def close_db(error=None):
+def close_db(_error=None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
 
 
-def init_db():
+def init_db() -> None:
     db = get_db()
 
     db.execute(
@@ -103,20 +82,26 @@ def init_db():
     db.commit()
 
 
-with app.app_context():
-    init_db()
-
-
 def allowed_file(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    allowed_extensions = current_app.config.get("ALLOWED_EXTENSIONS", set())
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_extensions
 
 
 def save_uploaded_file(file_storage) -> tuple[str, Path]:
     original_name = secure_filename(file_storage.filename or "document")
     timestamp_name = f"{int(time.time() * 1000)}_{original_name}"
-    destination = UPLOAD_FOLDER / timestamp_name
+    upload_folder = Path(current_app.config["UPLOAD_FOLDER"])
+    destination = upload_folder / timestamp_name
     file_storage.save(destination)
     return original_name, destination
+
+
+def cleanup_file(path: Path | None) -> None:
+    if path and path.exists():
+        try:
+            path.unlink()
+        except OSError:
+            logger.warning("Could not remove file: %s", path)
 
 
 def extract_text_from_file(file_path: Path) -> str:
@@ -135,7 +120,11 @@ def extract_text_from_file(file_path: Path) -> str:
 
 
 def extract_text_from_txt(file_path: Path) -> str:
-    return file_path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        return file_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        logger.exception("TXT parsing failed: %s", exc)
+        return ""
 
 
 def extract_text_from_pdf(file_path: Path) -> str:
@@ -147,13 +136,17 @@ def extract_text_from_pdf(file_path: Path) -> str:
         try:
             from PyPDF2 import PdfReader
         except Exception as exc:
-            raise RuntimeError("PDF support requires pypdf or PyPDF2 to be installed.") from exc
+            raise RuntimeError("PDF support requires pypdf or PyPDF2.") from exc
 
-    reader = PdfReader(str(file_path))
-    for page in reader.pages:
-        page_text = page.extract_text() or ""
-        if page_text.strip():
-            text_parts.append(page_text)
+    try:
+        reader = PdfReader(str(file_path))
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                text_parts.append(page_text)
+    except Exception as exc:
+        logger.exception("PDF parsing failed: %s", exc)
+        return ""
 
     return "\n".join(text_parts)
 
@@ -162,11 +155,15 @@ def extract_text_from_docx(file_path: Path) -> str:
     try:
         from docx import Document
     except Exception as exc:
-        raise RuntimeError("DOCX support requires python-docx to be installed.") from exc
+        raise RuntimeError("DOCX support requires python-docx.") from exc
 
-    doc = Document(str(file_path))
-    paragraphs = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
-    return "\n".join(paragraphs)
+    try:
+        doc = Document(str(file_path))
+        paragraphs = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+        return "\n".join(paragraphs)
+    except Exception as exc:
+        logger.exception("DOCX parsing failed: %s", exc)
+        return ""
 
 
 def normalize_document_text(text: str) -> str:
@@ -176,23 +173,6 @@ def normalize_document_text(text: str) -> str:
         if line:
             lines.append(line)
     return "\n".join(lines).strip()
-
-
-def dedupe_keep_order(items: list[str]) -> list[str]:
-    seen = set()
-    output = []
-
-    for item in items:
-        cleaned = " ".join((item or "").split()).strip()
-        if not cleaned:
-            continue
-
-        key = cleaned.lower()
-        if key not in seen:
-            seen.add(key)
-            output.append(cleaned)
-
-    return output
 
 
 def build_structured_summary(document_text: str) -> str:
@@ -221,10 +201,10 @@ def build_summary(document_text: str) -> str:
 
 
 def get_safe_upload_path(filename: str) -> Path:
-    requested_path = (UPLOAD_FOLDER / filename).resolve()
-    uploads_root = UPLOAD_FOLDER.resolve()
+    upload_root = Path(current_app.config["UPLOAD_FOLDER"]).resolve()
+    requested_path = (upload_root / filename).resolve()
 
-    if uploads_root not in requested_path.parents and requested_path != uploads_root:
+    if upload_root not in requested_path.parents and requested_path != upload_root:
         abort(404)
 
     if not requested_path.exists() or not requested_path.is_file():
@@ -242,65 +222,6 @@ def get_document_file_path(document: dict) -> Path:
 
     stored_name = document.get("stored_name", "")
     return get_safe_upload_path(stored_name)
-
-
-def get_pdf_page_count(file_path: Path) -> int:
-    try:
-        import fitz
-    except Exception:
-        return 0
-
-    pdf = fitz.open(str(file_path))
-    try:
-        return pdf.page_count
-    finally:
-        pdf.close()
-
-
-def extract_report_data(document: dict) -> dict:
-    document_text = document.get("document_text", "") or ""
-    cleaned = sanitize_document_text(document_text)
-
-    date_patterns = [
-        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
-        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b",
-        r"\bweek\s+\d+\b",
-    ]
-
-    dates: list[str] = []
-    for pattern in date_patterns:
-        dates.extend(re.findall(pattern, cleaned, flags=re.IGNORECASE))
-
-    emails = re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", cleaned)
-    amounts = re.findall(r"(?:\$|USD\s*)\d[\d,]*(?:\.\d{2})?", cleaned, flags=re.IGNORECASE)
-    action_items = extract_action_items(cleaned)
-
-    preview_text = document_text[:9000].strip()
-    if len(document_text) > 9000:
-        preview_text += "..."
-
-    is_pdf = str(document.get("file_name", "")).lower().endswith(".pdf")
-
-    pdf_page_count = 0
-    pdf_preview_available = False
-
-    if is_pdf:
-        try:
-            pdf_page_count = get_pdf_page_count(get_document_file_path(document))
-            pdf_preview_available = pdf_page_count > 0
-        except Exception as exc:
-            logger.warning("PDF preview unavailable: %s", exc)
-
-    return {
-        "dates": dedupe_keep_order(dates),
-        "emails": dedupe_keep_order(emails),
-        "amounts": dedupe_keep_order(amounts),
-        "action_items": dedupe_keep_order(action_items),
-        "preview_text": preview_text,
-        "is_pdf": is_pdf,
-        "pdf_page_count": pdf_page_count,
-        "pdf_preview_available": pdf_preview_available,
-    }
 
 
 def insert_document(file_name: str, stored_name: str, file_path: Path, document_text: str) -> int:
@@ -352,7 +273,7 @@ def get_chat_history(document_id: int):
     ).fetchall()
 
 
-def insert_chat_history(document_id: int, question: str, answer: str):
+def insert_chat_history(document_id: int, question: str, answer: str) -> None:
     db = get_db()
     db.execute(
         """
@@ -399,72 +320,6 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
     return True
 
 
-@app.route("/uploads/<path:filename>")
-def uploaded_file(filename: str):
-    file_path = get_safe_upload_path(filename)
-    return send_file(
-        file_path,
-        as_attachment=False,
-        conditional=True,
-        download_name=file_path.name,
-        max_age=0,
-    )
-
-
-@app.route("/preview-page/<path:filename>/<int:page_number>")
-def preview_pdf_page(filename: str, page_number: int):
-    file_path = get_safe_upload_path(filename)
-
-    if file_path.suffix.lower() != ".pdf":
-        abort(404)
-
-    if page_number < 1:
-        abort(404)
-
-    try:
-        import fitz
-    except Exception:
-        abort(500)
-
-    pdf = fitz.open(str(file_path))
-    try:
-        if page_number > pdf.page_count:
-            abort(404)
-
-        page = pdf.load_page(page_number - 1)
-        zoom = 1.5
-        matrix = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        image_bytes = pix.tobytes("png")
-    finally:
-        pdf.close()
-
-    response = send_file(
-        BytesIO(image_bytes),
-        mimetype="image/png",
-        as_attachment=False,
-        download_name=f"{file_path.stem}_page_{page_number}.png",
-        max_age=0,
-    )
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    return response
-
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        return handle_upload_request()
-
-    documents = get_recent_documents()
-    return render_template("index.html", documents=documents)
-
-
-@app.route("/upload", methods=["POST"])
-def upload():
-    return handle_upload_request()
-
-
 def handle_upload_request():
     file_storage = request.files.get("document") or request.files.get("file")
 
@@ -476,12 +331,15 @@ def handle_upload_request():
         flash("Only PDF, DOCX, and TXT files are allowed.", "error")
         return redirect(url_for("index"))
 
+    saved_path = None
+
     try:
         original_name, saved_path = save_uploaded_file(file_storage)
         raw_text = extract_text_from_file(saved_path)
         document_text = normalize_document_text(raw_text)
 
         if not document_text:
+            cleanup_file(saved_path)
             flash("The uploaded document could not be processed correctly.", "error")
             return redirect(url_for("index"))
 
@@ -496,132 +354,250 @@ def handle_upload_request():
 
     except Exception as exc:
         logger.exception("Upload failed: %s", exc)
-        flash(f"Upload failed: {exc}", "error")
+        cleanup_file(saved_path)
+        flash("Upload failed. Please try another file.", "error")
         return redirect(url_for("index"))
 
 
-@app.route("/chat/<int:document_id>", methods=["GET"])
-def chat(document_id: int):
-    document = get_document(document_id)
-    if document is None:
-        flash("Document not found.", "error")
-        return redirect(url_for("index"))
+def create_app() -> Flask:
+    app = Flask(__name__)
+    app.config.from_object(Config)
 
-    chat_history = get_chat_history(document_id)
+    Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)
+    Path(app.config["INSTANCE_FOLDER"]).mkdir(parents=True, exist_ok=True)
+    Path(app.config["DATABASE_PATH"]).parent.mkdir(parents=True, exist_ok=True)
 
-    return render_template(
-        "chat.html",
-        document=dict(document),
-        chat_history=[dict(row) for row in chat_history],
-        api_key_available=bool(OPENAI_API_KEY),
-    )
+    app.teardown_appcontext(close_db)
 
+    with app.app_context():
+        init_db()
 
-@app.route("/ask/<int:document_id>", methods=["POST"])
-def ask(document_id: int):
-    document = get_document(document_id)
-    if document is None:
-        return jsonify({"success": False, "message": "Document not found."}), 404
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_large_file(_error):
+        return (
+            render_template(
+                "error.html",
+                message="The uploaded file is too large. Maximum allowed size is 16 MB.",
+            ),
+            413,
+        )
 
-    question = (request.form.get("question") or "").strip()
-    mode = (request.form.get("mode") or "document").strip().lower()
+    @app.route("/uploads/<path:filename>")
+    def uploaded_file(filename: str):
+        file_path = get_safe_upload_path(filename)
+        return send_file(
+            file_path,
+            as_attachment=False,
+            conditional=True,
+            download_name=file_path.name,
+            max_age=0,
+        )
 
-    if not question:
-        return jsonify({"success": False, "message": "Please enter a question."}), 400
+    @app.route("/preview-page/<path:filename>/<int:page_number>")
+    def preview_pdf_page(filename: str, page_number: int):
+        file_path = get_safe_upload_path(filename)
 
-    document_text = document["document_text"] or ""
+        if file_path.suffix.lower() != ".pdf" or page_number < 1:
+            abort(404)
 
-    try:
-        if mode == "ai":
-            if not OPENAI_API_KEY:
+        try:
+            import fitz
+        except Exception:
+            abort(500)
+
+        pdf = fitz.open(str(file_path))
+        try:
+            if page_number > pdf.page_count:
+                abort(404)
+
+            page = pdf.load_page(page_number - 1)
+            matrix = fitz.Matrix(1.5, 1.5)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            image_bytes = pix.tobytes("png")
+        finally:
+            pdf.close()
+
+        response = send_file(
+            BytesIO(image_bytes),
+            mimetype="image/png",
+            as_attachment=False,
+            download_name=f"{file_path.stem}_page_{page_number}.png",
+            max_age=0,
+        )
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+    @app.route("/", methods=["GET", "POST"])
+    def index():
+        if request.method == "POST":
+            return handle_upload_request()
+
+        documents = get_recent_documents()
+        return render_template("index.html", documents=documents)
+
+    @app.route("/upload", methods=["POST"])
+    def upload():
+        return handle_upload_request()
+
+    @app.route("/chat/<int:document_id>", methods=["GET"])
+    def chat(document_id: int):
+        document = get_document(document_id)
+        if document is None:
+            flash("Document not found.", "error")
+            return redirect(url_for("index"))
+
+        chat_history = get_chat_history(document_id)
+
+        return render_template(
+            "chat.html",
+            document=dict(document),
+            chat_history=[dict(row) for row in chat_history],
+            api_key_available=bool(current_app.config.get("OPENAI_API_KEY")),
+        )
+
+    @app.route("/ask/<int:document_id>", methods=["POST"])
+    def ask(document_id: int):
+        document = get_document(document_id)
+        if document is None:
+            return jsonify({"success": False, "message": "Document not found."}), 404
+
+        question = (request.form.get("question") or "").strip()
+        mode = (request.form.get("mode") or "document").strip().lower()
+
+        if not question:
+            return jsonify({"success": False, "message": "Please enter a question."}), 400
+
+        document_text = document["document_text"] or ""
+        api_key = current_app.config.get("OPENAI_API_KEY", "")
+
+        try:
+            if mode == "ai":
+                if not api_key:
+                    return jsonify(
+                        {
+                            "success": False,
+                            "message": "AI fallback is not available right now.",
+                        }
+                    ), 400
+
+                answer = answer_with_ai_fallback(question, document_text, api_key)
+
+                updated_existing = append_ai_answer_to_latest_not_found(
+                    document_id=document_id,
+                    question=question,
+                    ai_answer=answer,
+                )
+
+                if not updated_existing:
+                    insert_chat_history(document_id, question, answer)
+
                 return jsonify(
                     {
-                        "success": False,
-                        "message": "AI fallback is not available right now.",
+                        "success": True,
+                        "answer": answer,
+                        "not_found": False,
+                        "mode": "ai",
+                        "ai_fallback_available": True,
                     }
-                ), 400
+                )
 
-            answer = answer_with_ai_fallback(question, document_text, OPENAI_API_KEY)
-
-            updated_existing = append_ai_answer_to_latest_not_found(
-                document_id=document_id,
-                question=question,
-                ai_answer=answer,
-            )
-
-            if not updated_existing:
-                insert_chat_history(document_id, question, answer)
+            answer = answer_question(question, document_text, api_key)
+            insert_chat_history(document_id, question, answer)
 
             return jsonify(
                 {
                     "success": True,
                     "answer": answer,
-                    "not_found": False,
-                    "mode": "ai",
-                    "ai_fallback_available": True,
+                    "not_found": answer == NOT_FOUND_MESSAGE,
+                    "mode": "document",
+                    "ai_fallback_available": bool(api_key),
                 }
             )
 
-        answer = answer_question(question, document_text, OPENAI_API_KEY)
-        insert_chat_history(document_id, question, answer)
+        except Exception as exc:
+            logger.exception("Ask route failed: %s", exc)
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "The chatbot could not answer right now.",
+                }
+            ), 500
 
-        return jsonify(
-            {
-                "success": True,
-                "answer": answer,
-                "not_found": answer == NOT_FOUND_MESSAGE,
-                "mode": "document",
-                "ai_fallback_available": bool(OPENAI_API_KEY),
-            }
+    @app.route("/result/<int:document_id>", methods=["GET"])
+    def result(document_id: int):
+        document = get_document(document_id)
+        if document is None:
+            flash("Document not found.", "error")
+            return redirect(url_for("index"))
+
+        document_dict = dict(document)
+        structured_summary = document_dict.get("summary") or build_structured_summary(
+            document_dict.get("document_text", "")
         )
 
-    except Exception as exc:
-        logger.exception("Ask route failed: %s", exc)
-        return jsonify(
-            {
-                "success": False,
-                "message": "The chatbot could not answer right now.",
-            }
-        ), 500
+        return render_template(
+            "result.html",
+            document=document_dict,
+            structured_summary=structured_summary,
+        )
+
+    @app.route("/report/<int:document_id>", methods=["GET"])
+    def report(document_id: int):
+        document = get_document(document_id)
+        if document is None:
+            flash("Document not found.", "error")
+            return redirect(url_for("index"))
+
+        document_dict = dict(document)
+        structured_summary = document_dict.get("summary") or build_structured_summary(
+            document_dict.get("document_text", "")
+        )
+
+        report_data = build_report_data(
+            document_dict,
+            file_path=get_document_file_path(document_dict),
+        )
+
+        return render_template(
+            "report.html",
+            document=document_dict,
+            structured_summary=structured_summary,
+            report_data=report_data,
+        )
+
+    @app.route("/report/<int:document_id>/download", methods=["GET"])
+    def download_report(document_id: int):
+        document = get_document(document_id)
+        if document is None:
+            flash("Document not found.", "error")
+            return redirect(url_for("index"))
+
+        document_dict = dict(document)
+        structured_summary = document_dict.get("summary") or build_structured_summary(
+            document_dict.get("document_text", "")
+        )
+
+        report_data = build_report_data(
+            document_dict,
+            file_path=get_document_file_path(document_dict),
+        )
+        report_data["summary"] = structured_summary
+
+        pdf_buffer = build_report_pdf(report_data)
+        stem = Path(document_dict.get("file_name", f"report_{document_id}")).stem
+
+        return send_file(
+            pdf_buffer,
+            as_attachment=True,
+            download_name=f"{stem}_report.pdf",
+            mimetype="application/pdf",
+        )
+
+    return app
 
 
-@app.route("/result/<int:document_id>", methods=["GET"])
-def result(document_id: int):
-    document = get_document(document_id)
-    if document is None:
-        flash("Document not found.", "error")
-        return redirect(url_for("index"))
-
-    document_dict = dict(document)
-    structured_summary = build_structured_summary(document_dict.get("document_text", ""))
-
-    return render_template(
-        "result.html",
-        document=document_dict,
-        structured_summary=structured_summary,
-    )
-
-
-@app.route("/report/<int:document_id>", methods=["GET"])
-def report(document_id: int):
-    document = get_document(document_id)
-    if document is None:
-        flash("Document not found.", "error")
-        return redirect(url_for("index"))
-
-    document_dict = dict(document)
-    document_text = document_dict.get("document_text", "")
-
-    structured_summary = build_structured_summary(document_text)
-    report_data = extract_report_data(document_dict)
-
-    return render_template(
-        "report.html",
-        document=document_dict,
-        structured_summary=structured_summary,
-        report_data=report_data,
-    )
-
+app = create_app()
 
 if __name__ == "__main__":
     app.run(debug=True)
