@@ -1,5 +1,6 @@
 import logging
 import os
+
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -19,9 +20,21 @@ from utils.summarizer import generate_summary
 from utils.extractor import extract_key_information
 from utils.report_generator import build_report_data, build_report_pdf
 from utils.qa_engine import answer_question
+from utils.general_qa import answer_general_openai, search_google
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+NOT_FOUND_MESSAGE = "The requested information was not found in the uploaded document."
+
+PRESET_QUESTIONS = [
+    "What is the main purpose of this document?",
+    "Summarize the important points.",
+    "What framework is required?",
+    "Are any deadlines mentioned?",
+    "What action items are listed?",
+    "Who is responsible for approval?",
+]
 
 
 def cleanup_file(path: str | None) -> None:
@@ -32,9 +45,49 @@ def cleanup_file(path: str | None) -> None:
             logger.warning("Could not remove file: %s", path)
 
 
+def is_not_found_answer(answer: str) -> bool:
+    normalized = (answer or "").strip().lower()
+    return (not normalized) or (normalized == NOT_FOUND_MESSAGE.lower())
+
+
+def resolve_custom_question(
+    question: str,
+    document_text: str,
+    openai_api_key: str,
+    google_api_key: str,
+    google_cse_id: str,
+    fallback_mode: str,
+) -> tuple[str, str]:
+    fallback_mode = (fallback_mode or "document_then_openai").strip()
+
+    if fallback_mode == "openai_only":
+        return answer_general_openai(question, openai_api_key), "OpenAI"
+
+    if fallback_mode == "google_only":
+        return search_google(question, google_api_key, google_cse_id), "Google"
+
+    document_answer = answer_question(
+        question=question,
+        document_text=document_text,
+        api_key=openai_api_key,
+    )
+
+    if not is_not_found_answer(document_answer):
+        return document_answer, "Document"
+
+    if fallback_mode == "document_then_google":
+        return search_google(question, google_api_key, google_cse_id), "Google"
+
+    return answer_general_openai(question, openai_api_key), "OpenAI"
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # Optional fallback config if Config does not define these
+    app.config["GOOGLE_API_KEY"] = app.config.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+    app.config["GOOGLE_CSE_ID"] = app.config.get("GOOGLE_CSE_ID") or os.getenv("GOOGLE_CSE_ID", "")
 
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
     init_db(app.config["DATABASE_PATH"])
@@ -122,10 +175,12 @@ def create_app() -> Flask:
             return render_template("error.html", message="Document not found."), 404
 
         chat_history = get_chat_history(app.config["DATABASE_PATH"], doc_id)
+
         return render_template(
             "chat.html",
             document=document,
             chat_history=chat_history,
+            preset_questions=PRESET_QUESTIONS,
         )
 
     @app.route("/ask/<int:doc_id>", methods=["POST"])
@@ -135,16 +190,30 @@ def create_app() -> Flask:
             return jsonify({"success": False, "message": "Document not found."}), 404
 
         question = request.form.get("question", "").strip()
+        question_mode = request.form.get("question_mode", "preset").strip()
+        fallback_mode = request.form.get("fallback_mode", "document_then_openai").strip()
+
         is_valid, error_message = validate_question(question)
         if not is_valid:
             return jsonify({"success": False, "message": error_message}), 400
 
         try:
-            answer = answer_question(
-                question=question,
-                document_text=document["cleaned_text"],
-                api_key=app.config["OPENAI_API_KEY"],
-            )
+            if question_mode == "custom":
+                answer, source = resolve_custom_question(
+                    question=question,
+                    document_text=document["cleaned_text"],
+                    openai_api_key=app.config["OPENAI_API_KEY"],
+                    google_api_key=app.config.get("GOOGLE_API_KEY", ""),
+                    google_cse_id=app.config.get("GOOGLE_CSE_ID", ""),
+                    fallback_mode=fallback_mode,
+                )
+            else:
+                answer = answer_question(
+                    question=question,
+                    document_text=document["cleaned_text"],
+                    api_key=app.config["OPENAI_API_KEY"],
+                )
+                source = "Document"
 
             save_chat_message(
                 db_path=app.config["DATABASE_PATH"],
@@ -153,7 +222,15 @@ def create_app() -> Flask:
                 chatbot_answer=answer,
             )
 
-            return jsonify({"success": True, "question": question, "answer": answer})
+            return jsonify(
+                {
+                    "success": True,
+                    "question": question,
+                    "answer": answer,
+                    "source": source,
+                    "question_mode": question_mode,
+                }
+            )
 
         except Exception as exc:
             logger.exception("Chatbot request failed for document %s: %s", doc_id, exc)
