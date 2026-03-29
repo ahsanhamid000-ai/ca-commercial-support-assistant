@@ -1,15 +1,25 @@
 import logging
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, flash, g, jsonify, redirect, render_template, request, url_for
-from openai import OpenAI
 from werkzeug.utils import secure_filename
 
-from utils.qa_engine import NOT_FOUND_MESSAGE, answer_question
+from utils.qa_engine import (
+    NOT_FOUND_MESSAGE,
+    answer_deadline_question,
+    answer_framework_question,
+    answer_list_question,
+    answer_purpose_question,
+    answer_question,
+    answer_summary_question,
+    answer_with_ai_fallback,
+    sanitize_document_text,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -133,10 +143,10 @@ def extract_text_from_pdf(file_path: Path) -> str:
     text_parts: list[str] = []
 
     try:
-        from pypdf import PdfReader  # preferred
+        from pypdf import PdfReader
     except Exception:
         try:
-            from PyPDF2 import PdfReader  # fallback
+            from PyPDF2 import PdfReader
         except Exception as exc:
             raise RuntimeError(
                 "PDF support requires pypdf or PyPDF2 to be installed."
@@ -173,19 +183,112 @@ def normalize_document_text(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def build_summary(text: str) -> str:
-    cleaned = normalize_document_text(text)
+# -----------------------------------------------------------------------------
+# Summary / report helpers
+# -----------------------------------------------------------------------------
+def split_bullet_text(text: str) -> list[str]:
+    items = []
+    for line in (text or "").splitlines():
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        if cleaned.startswith("- "):
+            cleaned = cleaned[2:].strip()
+        if cleaned:
+            items.append(cleaned)
+    return items
+
+
+def dedupe_keep_order(items: list[str]) -> list[str]:
+    seen = set()
+    output = []
+
+    for item in items:
+        cleaned = " ".join((item or "").split())
+        if not cleaned:
+            continue
+
+        key = cleaned.lower()
+        if key not in seen:
+            seen.add(key)
+            output.append(cleaned)
+
+    return output
+
+
+def build_structured_summary(document_text: str) -> str:
+    cleaned = sanitize_document_text(document_text or "")
     if not cleaned:
-        return ""
+        return "No summary available."
 
-    lines = cleaned.splitlines()
-    preview = lines[:8]
-    summary = "\n".join(preview).strip()
+    bullets: list[str] = []
 
-    if len(lines) > 8:
-        summary += "\n..."
+    purpose = answer_purpose_question(cleaned)
+    framework = answer_framework_question(cleaned)
+    deadline = answer_deadline_question(cleaned)
 
-    return summary
+    if purpose:
+        bullets.append(purpose)
+    if framework:
+        bullets.append(framework)
+    if deadline:
+        bullets.append(deadline)
+
+    summary_points = split_bullet_text(answer_summary_question(cleaned))
+    action_items = split_bullet_text(answer_list_question(cleaned))
+
+    bullets.extend(summary_points[:5])
+    bullets.extend(action_items[:4])
+
+    bullets = dedupe_keep_order(bullets)
+
+    if not bullets:
+        preview_sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+        fallback = []
+        for sentence in preview_sentences:
+            s = sentence.strip()
+            if s and len(s) > 25:
+                fallback.append(s)
+        bullets = fallback[:6]
+
+    if not bullets:
+        return "No summary available."
+
+    return "\n".join(f"- {item}" for item in bullets[:8])
+
+
+def build_summary(document_text: str) -> str:
+    return build_structured_summary(document_text)
+
+
+def extract_report_data(document_text: str) -> dict:
+    cleaned = sanitize_document_text(document_text or "")
+
+    date_patterns = [
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b",
+        r"\bweek\s+\d+\b",
+    ]
+
+    dates: list[str] = []
+    for pattern in date_patterns:
+        dates.extend(re.findall(pattern, cleaned, flags=re.IGNORECASE))
+
+    emails = re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", cleaned)
+    amounts = re.findall(r"(?:\$|USD\s*)\d[\d,]*(?:\.\d{2})?", cleaned, flags=re.IGNORECASE)
+    action_items = split_bullet_text(answer_list_question(cleaned))
+
+    preview = cleaned[:1400].strip()
+    if len(cleaned) > 1400:
+        preview += "..."
+
+    return {
+        "dates": dedupe_keep_order(dates),
+        "emails": dedupe_keep_order(emails),
+        "amounts": dedupe_keep_order(amounts),
+        "action_items": dedupe_keep_order(action_items),
+        "preview": preview,
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -288,61 +391,6 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
 
 
 # -----------------------------------------------------------------------------
-# AI fallback helper
-# -----------------------------------------------------------------------------
-def answer_with_ai_fallback(question: str, document_text: str, api_key: str | None) -> str:
-    question = (question or "").strip()
-    document_text = (document_text or "").strip()
-
-    if not question:
-        return "Please enter a question."
-
-    if not api_key:
-        return "AI fallback is not available because OPENAI_API_KEY is missing."
-
-    excerpt = document_text[:6000] if document_text else "No document text available."
-
-    prompt = (
-        "The document assistant could not find a direct answer in the uploaded document.\n\n"
-        f"User question:\n{question}\n\n"
-        "Document excerpt for context:\n"
-        f"{excerpt}\n\n"
-        "Please provide a concise, helpful answer using general reasoning. "
-        "Start your answer with: "
-        "'AI-generated answer (not found directly in the uploaded document):' "
-        "Do not falsely claim the answer was directly found in the document."
-    )
-
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            temperature=0.4,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a helpful assistant. "
-                        "The uploaded document did not contain a direct answer. "
-                        "Give a concise AI-generated answer."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-        )
-
-        if response.choices and response.choices[0].message:
-            content = (response.choices[0].message.content or "").strip()
-            if content:
-                return content
-
-    except Exception as exc:
-        logger.exception("AI fallback failed: %s", exc)
-
-    return "AI fallback is not available right now."
-
-
-# -----------------------------------------------------------------------------
 # Routes
 # -----------------------------------------------------------------------------
 @app.route("/", methods=["GET", "POST"])
@@ -386,7 +434,6 @@ def handle_upload_request():
             document_text=document_text,
         )
 
-        flash("Document uploaded successfully.", "success")
         return redirect(url_for("result", document_id=document_id))
 
     except Exception as exc:
@@ -476,10 +523,13 @@ def result(document_id: int):
         flash("Document not found.", "error")
         return redirect(url_for("index"))
 
+    document_dict = dict(document)
+    structured_summary = build_structured_summary(document_dict.get("document_text", ""))
+
     return render_template(
         "result.html",
-        document=dict(document),
-        summary=document["summary"] or "",
+        document=document_dict,
+        structured_summary=structured_summary,
     )
 
 
@@ -490,12 +540,17 @@ def report(document_id: int):
         flash("Document not found.", "error")
         return redirect(url_for("index"))
 
+    document_dict = dict(document)
+    document_text = document_dict.get("document_text", "")
+
+    structured_summary = build_structured_summary(document_text)
+    report_data = extract_report_data(document_text)
+
     return render_template(
         "report.html",
-        document=dict(document),
-        summary=document["summary"] or "",
-        document_text=document["document_text"] or "",
-        chat_history=[dict(row) for row in get_chat_history(document_id)],
+        document=document_dict,
+        structured_summary=structured_summary,
+        report_data=report_data,
     )
 
 
