@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 import os
 import re
 import sqlite3
@@ -8,9 +9,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    abort,
     flash,
     g,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -351,7 +354,29 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
 
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename: str):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+    file_path = Path(app.config["UPLOAD_FOLDER"]) / filename
+
+    if not file_path.exists():
+        abort(404)
+
+    guessed_type, _ = mimetypes.guess_type(str(file_path))
+    mime_type = guessed_type or "application/octet-stream"
+
+    response = make_response(
+        send_from_directory(
+            app.config["UPLOAD_FOLDER"],
+            filename,
+            as_attachment=False,
+            mimetype=mime_type,
+        )
+    )
+
+    if filename.lower().endswith(".pdf"):
+        response.headers["Content-Type"] = "application/pdf"
+        response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+    return response
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -466,7 +491,6 @@ def ask(document_id: int):
             )
 
         answer = answer_question(question, document_text, OPENAI_API_KEY)
-
         insert_chat_history(document_id, question, answer)
 
         return jsonify(
