@@ -3,6 +3,7 @@ import os
 import re
 import sqlite3
 import time
+from io import BytesIO
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -232,6 +233,30 @@ def get_safe_upload_path(filename: str) -> Path:
     return requested_path
 
 
+def get_document_file_path(document: dict) -> Path:
+    existing_path = document.get("file_path")
+    if existing_path:
+        existing_path_obj = Path(existing_path)
+        if existing_path_obj.exists():
+            return existing_path_obj
+
+    stored_name = document.get("stored_name", "")
+    return get_safe_upload_path(stored_name)
+
+
+def get_pdf_page_count(file_path: Path) -> int:
+    try:
+        import fitz
+    except Exception:
+        return 0
+
+    pdf = fitz.open(str(file_path))
+    try:
+        return pdf.page_count
+    finally:
+        pdf.close()
+
+
 def extract_report_data(document: dict) -> dict:
     document_text = document.get("document_text", "") or ""
     cleaned = sanitize_document_text(document_text)
@@ -256,6 +281,16 @@ def extract_report_data(document: dict) -> dict:
 
     is_pdf = str(document.get("file_name", "")).lower().endswith(".pdf")
 
+    pdf_page_count = 0
+    pdf_preview_available = False
+
+    if is_pdf:
+        try:
+            pdf_page_count = get_pdf_page_count(get_document_file_path(document))
+            pdf_preview_available = pdf_page_count > 0
+        except Exception as exc:
+            logger.warning("PDF preview unavailable: %s", exc)
+
     return {
         "dates": dedupe_keep_order(dates),
         "emails": dedupe_keep_order(emails),
@@ -263,7 +298,8 @@ def extract_report_data(document: dict) -> dict:
         "action_items": dedupe_keep_order(action_items),
         "preview_text": preview_text,
         "is_pdf": is_pdf,
-        "pdf_data_url": url_for("preview_pdf", filename=document["stored_name"]) if is_pdf else None,
+        "pdf_page_count": pdf_page_count,
+        "pdf_preview_available": pdf_preview_available,
     }
 
 
@@ -363,33 +399,56 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
     return True
 
 
-@app.route("/preview/<path:filename>")
-def preview_pdf(filename: str):
+@app.route("/uploads/<path:filename>")
+def uploaded_file(filename: str):
     file_path = get_safe_upload_path(filename)
-
-    if file_path.suffix.lower() != ".pdf":
-        abort(404)
-
-    response = send_file(
+    return send_file(
         file_path,
-        mimetype="application/pdf",
         as_attachment=False,
         conditional=True,
         download_name=file_path.name,
         max_age=0,
     )
-    response.headers["Content-Type"] = "application/pdf"
-    response.headers["Content-Disposition"] = f'inline; filename="{file_path.name}"'
-    response.headers["X-Content-Type-Options"] = "nosniff"
+
+
+@app.route("/preview-page/<path:filename>/<int:page_number>")
+def preview_pdf_page(filename: str, page_number: int):
+    file_path = get_safe_upload_path(filename)
+
+    if file_path.suffix.lower() != ".pdf":
+        abort(404)
+
+    if page_number < 1:
+        abort(404)
+
+    try:
+        import fitz
+    except Exception:
+        abort(500)
+
+    pdf = fitz.open(str(file_path))
+    try:
+        if page_number > pdf.page_count:
+            abort(404)
+
+        page = pdf.load_page(page_number - 1)
+        zoom = 1.5
+        matrix = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        image_bytes = pix.tobytes("png")
+    finally:
+        pdf.close()
+
+    response = send_file(
+        BytesIO(image_bytes),
+        mimetype="image/png",
+        as_attachment=False,
+        download_name=f"{file_path.stem}_page_{page_number}.png",
+        max_age=0,
+    )
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
-
-
-@app.route("/uploads/<path:filename>")
-def uploaded_file(filename: str):
-    file_path = get_safe_upload_path(filename)
-    return send_file(file_path, as_attachment=False, conditional=True, download_name=file_path.name)
 
 
 @app.route("/", methods=["GET", "POST"])
