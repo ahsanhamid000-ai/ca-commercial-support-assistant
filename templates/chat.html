@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% set doc_title = document.file_name if document.file_name is defined and document.file_name else (document.filename if document.filename is defined and document.filename else "Uploaded Document") %}
-{% set default_questions = [
+{% set doc_title = document.file_name if document.file_name is defined and document.file_name else "Uploaded Document" %}
+{% set guided_questions = [
     "What is the main purpose of this document?",
     "Summarize the important points.",
     "What framework is required?",
@@ -10,7 +10,6 @@
     "What action items are listed?",
     "Who is responsible for approval?"
 ] %}
-{% set guided_questions = preset_questions if preset_questions is defined and preset_questions else default_questions %}
 
 <style>
     .chat-shell {
@@ -59,20 +58,7 @@
     }
 
     .message-meta {
-        display: flex;
-        align-items: center;
-        gap: 8px;
         margin-bottom: 6px;
-        flex-wrap: wrap;
-    }
-
-    .source-badge {
-        display: inline-block;
-        font-size: 12px;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: #203864;
-        color: white;
     }
 
     .custom-box {
@@ -88,8 +74,7 @@
         display: block;
     }
 
-    .custom-box textarea,
-    .custom-box select {
+    .custom-box textarea {
         width: 100%;
         padding: 10px 12px;
         margin-top: 8px;
@@ -216,34 +201,21 @@
 
         <div class="chat-history" id="chatHistory">
             {% if not chat_history %}
-                <div class="message assistant">
-                    <div class="message-meta">
-                        <strong>Assistant:</strong>
-                    </div>
+                <div class="message assistant" id="initialAssistantMessage">
+                    <div class="message-meta"><strong>Assistant:</strong></div>
                     Please choose a question from the popup list.
                 </div>
             {% endif %}
 
             {% for item in chat_history %}
-                {% set user_q = item.user_question if item.user_question is defined else (item.question if item.question is defined else "") %}
-                {% set bot_a = item.chatbot_answer if item.chatbot_answer is defined else (item.answer if item.answer is defined else "") %}
-                {% set bot_source = item.source if item.source is defined else "" %}
-
                 <div class="message user">
-                    <div class="message-meta">
-                        <strong>You:</strong>
-                    </div>
-                    {{ user_q }}
+                    <div class="message-meta"><strong>You:</strong></div>
+                    {{ item.user_question }}
                 </div>
 
                 <div class="message assistant">
-                    <div class="message-meta">
-                        <strong>Assistant:</strong>
-                        {% if bot_source %}
-                            <span class="source-badge">{{ bot_source }}</span>
-                        {% endif %}
-                    </div>
-                    {{ bot_a }}
+                    <div class="message-meta"><strong>Assistant:</strong></div>
+                    {{ item.chatbot_answer }}
                 </div>
             {% endfor %}
         </div>
@@ -252,16 +224,8 @@
             <label for="questionInput"><strong>Type your custom question</strong></label>
             <textarea id="questionInput" rows="4" placeholder="Type any question here..."></textarea>
 
-            <label for="fallbackMode"><strong>Choose answer source</strong></label>
-            <select id="fallbackMode">
-                <option value="document_then_openai">Check document first, then use OpenAI</option>
-                <option value="document_then_google">Check document first, then search Google</option>
-                <option value="openai_only">Use OpenAI only</option>
-                <option value="google_only">Use Google only</option>
-            </select>
-
             <p class="helper-text">
-                For custom questions, the app can answer from the uploaded document first or use OpenAI / Google.
+                This version uses your current document chatbot backend only.
             </p>
 
             <div class="action-row">
