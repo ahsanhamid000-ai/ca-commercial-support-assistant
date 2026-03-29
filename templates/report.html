@@ -117,20 +117,106 @@
         font-size: 15px;
     }
 
-    .pdf-preview-shell {
-        width: 100%;
+    .pdf-viewer-shell {
         border: 1px solid #dbe4f3;
         border-radius: 16px;
         background: #eef2f7;
         overflow: hidden;
     }
 
-    .pdf-frame {
-        width: 100%;
-        height: 1100px;
-        border: none;
-        display: block;
+    .pdf-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-bottom: 1px solid #dbe4f3;
+        background: #f8fbff;
+        flex-wrap: wrap;
+    }
+
+    .pdf-toolbar-left,
+    .pdf-toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .pdf-toolbar-btn {
+        border: 1px solid #ccd7ea;
         background: #ffffff;
+        color: #1f2a44;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.18s ease;
+    }
+
+    .pdf-toolbar-btn:hover {
+        background: #eef4ff;
+    }
+
+    .pdf-toolbar-btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+
+    .pdf-status {
+        font-size: 14px;
+        color: #51638f;
+        font-weight: 700;
+    }
+
+    .pdf-scroll-area {
+        max-height: 1100px;
+        overflow-y: auto;
+        padding: 18px;
+        background: #dde5f0;
+    }
+
+    .pdf-pages {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        align-items: center;
+    }
+
+    .pdf-page-card {
+        width: 100%;
+        max-width: 900px;
+        background: #ffffff;
+        border: 1px solid #dbe4f3;
+        border-radius: 12px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+        padding: 14px;
+    }
+
+    .pdf-page-label {
+        font-size: 13px;
+        color: #64748b;
+        font-weight: 700;
+        margin-bottom: 10px;
+    }
+
+    .pdf-page-canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: #ffffff;
+        border-radius: 8px;
+    }
+
+    .pdf-error {
+        padding: 18px;
+        border-radius: 12px;
+        background: #fff4f4;
+        border: 1px solid #f1caca;
+        color: #9f1239;
+        font-size: 14px;
+        font-weight: 600;
     }
 
     .action-row {
@@ -181,8 +267,9 @@
             padding: 24px 18px;
         }
 
-        .pdf-frame {
-            height: 700px;
+        .pdf-scroll-area {
+            max-height: 700px;
+            padding: 12px;
         }
     }
 </style>
@@ -270,13 +357,26 @@
             <div class="info-box full">
                 <h3 class="mini-title">Document Preview</h3>
 
-                {% if report_data.is_pdf and report_data.preview_url %}
-                    <div class="pdf-preview-shell">
-                        <iframe
-                            class="pdf-frame"
-                            src="{{ report_data.preview_url }}#toolbar=1&navpanes=1&scrollbar=1&view=FitH"
-                            title="PDF Preview">
-                        </iframe>
+                {% if report_data.is_pdf and report_data.pdf_data_url %}
+                    <div
+                        class="pdf-viewer-shell"
+                        id="pdfViewerShell"
+                        data-pdf-url="{{ report_data.pdf_data_url }}">
+                        <div class="pdf-toolbar">
+                            <div class="pdf-toolbar-left">
+                                <button type="button" class="pdf-toolbar-btn" id="zoomOutBtn">− Zoom</button>
+                                <button type="button" class="pdf-toolbar-btn" id="zoomInBtn">+ Zoom</button>
+                                <button type="button" class="pdf-toolbar-btn" id="reloadPdfBtn">Reload</button>
+                            </div>
+
+                            <div class="pdf-toolbar-right">
+                                <span class="pdf-status" id="pdfStatus">Loading PDF preview...</span>
+                            </div>
+                        </div>
+
+                        <div class="pdf-scroll-area" id="pdfScrollArea">
+                            <div class="pdf-pages" id="pdfPages"></div>
+                        </div>
                     </div>
                 {% else %}
                     <p class="preview-text">{{ report_data.preview_text }}</p>
@@ -292,4 +392,132 @@
         </div>
     </div>
 </div>
+
+{% if report_data.is_pdf and report_data.pdf_data_url %}
+<script type="module">
+    import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs";
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";
+
+    const shell = document.getElementById("pdfViewerShell");
+    const pagesContainer = document.getElementById("pdfPages");
+    const statusEl = document.getElementById("pdfStatus");
+    const zoomInBtn = document.getElementById("zoomInBtn");
+    const zoomOutBtn = document.getElementById("zoomOutBtn");
+    const reloadPdfBtn = document.getElementById("reloadPdfBtn");
+
+    let pdfDoc = null;
+    let zoomScale = 1.15;
+    let rendering = false;
+
+    async function loadPdfDocument() {
+        const pdfUrl = shell?.dataset?.pdfUrl;
+        if (!pdfUrl) {
+            statusEl.textContent = "PDF URL not found.";
+            return;
+        }
+
+        statusEl.textContent = "Loading PDF preview...";
+        pagesContainer.innerHTML = "";
+
+        try {
+            const response = await fetch(pdfUrl, {
+                cache: "no-store",
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error("Unable to load PDF data.");
+            }
+
+            const pdfBytes = await response.arrayBuffer();
+            const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
+            pdfDoc = await loadingTask.promise;
+
+            statusEl.textContent = `Loaded ${pdfDoc.numPages} page(s). Rendering...`;
+            await renderAllPages();
+            statusEl.textContent = `Showing ${pdfDoc.numPages} page(s).`;
+        } catch (error) {
+            console.error(error);
+            pagesContainer.innerHTML = `
+                <div class="pdf-error">
+                    PDF preview could not be loaded inside the page.
+                </div>
+            `;
+            statusEl.textContent = "Preview failed.";
+        }
+    }
+
+    async function renderAllPages() {
+        if (!pdfDoc || rendering) return;
+
+        rendering = true;
+        pagesContainer.innerHTML = "";
+
+        try {
+            for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
+                const page = await pdfDoc.getPage(pageNumber);
+                const viewport = page.getViewport({ scale: zoomScale });
+
+                const pageCard = document.createElement("div");
+                pageCard.className = "pdf-page-card";
+
+                const pageLabel = document.createElement("div");
+                pageLabel.className = "pdf-page-label";
+                pageLabel.textContent = `Page ${pageNumber}`;
+
+                const canvas = document.createElement("canvas");
+                canvas.className = "pdf-page-canvas";
+
+                const context = canvas.getContext("2d");
+                const outputScale = window.devicePixelRatio || 1;
+
+                canvas.width = Math.floor(viewport.width * outputScale);
+                canvas.height = Math.floor(viewport.height * outputScale);
+                canvas.style.width = `${viewport.width}px`;
+                canvas.style.height = `${viewport.height}px`;
+
+                context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+
+                pageCard.appendChild(pageLabel);
+                pageCard.appendChild(canvas);
+                pagesContainer.appendChild(pageCard);
+
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+            }
+        } finally {
+            rendering = false;
+        }
+    }
+
+    zoomInBtn?.addEventListener("click", async () => {
+        if (!pdfDoc || rendering) return;
+        zoomScale = Math.min(zoomScale + 0.15, 2.4);
+        statusEl.textContent = "Rendering...";
+        await renderAllPages();
+        statusEl.textContent = `Showing ${pdfDoc.numPages} page(s).`;
+    });
+
+    zoomOutBtn?.addEventListener("click", async () => {
+        if (!pdfDoc || rendering) return;
+        zoomScale = Math.max(zoomScale - 0.15, 0.65);
+        statusEl.textContent = "Rendering...";
+        await renderAllPages();
+        statusEl.textContent = `Showing ${pdfDoc.numPages} page(s).`;
+    });
+
+    reloadPdfBtn?.addEventListener("click", async () => {
+        if (rendering) return;
+        await loadPdfDocument();
+    });
+
+    loadPdfDocument();
+</script>
+{% endif %}
 {% endblock %}
