@@ -11,27 +11,21 @@ from werkzeug.utils import secure_filename
 
 from utils.qa_engine import (
     NOT_FOUND_MESSAGE,
-    answer_deadline_question,
-    answer_framework_question,
-    answer_list_question,
-    answer_purpose_question,
     answer_question,
-    answer_summary_question,
     answer_with_ai_fallback,
+    extract_action_items,
+    generate_executive_summary_points,
     sanitize_document_text,
 )
 
 
-# -----------------------------------------------------------------------------
-# App setup
-# -----------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 INSTANCE_DIR = BASE_DIR / "instance"
 UPLOAD_FOLDER = BASE_DIR / "uploads"
 DATABASE_PATH = INSTANCE_DIR / "assistant.db"
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 
 load_dotenv()
 
@@ -50,9 +44,6 @@ UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# -----------------------------------------------------------------------------
-# Database helpers
-# -----------------------------------------------------------------------------
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
         conn = sqlite3.connect(app.config["DATABASE_PATH"])
@@ -105,9 +96,6 @@ with app.app_context():
     init_db()
 
 
-# -----------------------------------------------------------------------------
-# File helpers
-# -----------------------------------------------------------------------------
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -148,9 +136,7 @@ def extract_text_from_pdf(file_path: Path) -> str:
         try:
             from PyPDF2 import PdfReader
         except Exception as exc:
-            raise RuntimeError(
-                "PDF support requires pypdf or PyPDF2 to be installed."
-            ) from exc
+            raise RuntimeError("PDF support requires pypdf or PyPDF2 to be installed.") from exc
 
     reader = PdfReader(str(file_path))
     for page in reader.pages:
@@ -165,9 +151,7 @@ def extract_text_from_docx(file_path: Path) -> str:
     try:
         from docx import Document
     except Exception as exc:
-        raise RuntimeError(
-            "DOCX support requires python-docx to be installed."
-        ) from exc
+        raise RuntimeError("DOCX support requires python-docx to be installed.") from exc
 
     doc = Document(str(file_path))
     paragraphs = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
@@ -183,28 +167,12 @@ def normalize_document_text(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-# -----------------------------------------------------------------------------
-# Summary / report helpers
-# -----------------------------------------------------------------------------
-def split_bullet_text(text: str) -> list[str]:
-    items = []
-    for line in (text or "").splitlines():
-        cleaned = line.strip()
-        if not cleaned:
-            continue
-        if cleaned.startswith("- "):
-            cleaned = cleaned[2:].strip()
-        if cleaned:
-            items.append(cleaned)
-    return items
-
-
 def dedupe_keep_order(items: list[str]) -> list[str]:
     seen = set()
     output = []
 
     for item in items:
-        cleaned = " ".join((item or "").split())
+        cleaned = " ".join((item or "").split()).strip()
         if not cleaned:
             continue
 
@@ -221,40 +189,20 @@ def build_structured_summary(document_text: str) -> str:
     if not cleaned:
         return "No summary available."
 
-    bullets: list[str] = []
+    points = generate_executive_summary_points(cleaned)
 
-    purpose = answer_purpose_question(cleaned)
-    framework = answer_framework_question(cleaned)
-    deadline = answer_deadline_question(cleaned)
-
-    if purpose:
-        bullets.append(purpose)
-    if framework:
-        bullets.append(framework)
-    if deadline:
-        bullets.append(deadline)
-
-    summary_points = split_bullet_text(answer_summary_question(cleaned))
-    action_items = split_bullet_text(answer_list_question(cleaned))
-
-    bullets.extend(summary_points[:5])
-    bullets.extend(action_items[:4])
-
-    bullets = dedupe_keep_order(bullets)
-
-    if not bullets:
-        preview_sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    if not points:
         fallback = []
-        for sentence in preview_sentences:
-            s = sentence.strip()
-            if s and len(s) > 25:
-                fallback.append(s)
-        bullets = fallback[:6]
+        for sentence in re.split(r"(?<=[.!?])\s+", cleaned):
+            sentence = sentence.strip()
+            if len(sentence) >= 35:
+                fallback.append(sentence)
+        points = fallback[:6]
 
-    if not bullets:
+    if not points:
         return "No summary available."
 
-    return "\n".join(f"- {item}" for item in bullets[:8])
+    return "\n".join(f"- {point}" for point in points[:8])
 
 
 def build_summary(document_text: str) -> str:
@@ -276,7 +224,7 @@ def extract_report_data(document_text: str) -> dict:
 
     emails = re.findall(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", cleaned)
     amounts = re.findall(r"(?:\$|USD\s*)\d[\d,]*(?:\.\d{2})?", cleaned, flags=re.IGNORECASE)
-    action_items = split_bullet_text(answer_list_question(cleaned))
+    action_items = extract_action_items(cleaned)
 
     preview = cleaned[:1400].strip()
     if len(cleaned) > 1400:
@@ -291,9 +239,6 @@ def extract_report_data(document_text: str) -> dict:
     }
 
 
-# -----------------------------------------------------------------------------
-# Data helpers
-# -----------------------------------------------------------------------------
 def insert_document(file_name: str, stored_name: str, file_path: Path, document_text: str) -> int:
     db = get_db()
     summary = build_summary(document_text)
@@ -390,9 +335,6 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
     return True
 
 
-# -----------------------------------------------------------------------------
-# Routes
-# -----------------------------------------------------------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -554,8 +496,5 @@ def report(document_id: int):
     )
 
 
-# -----------------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
