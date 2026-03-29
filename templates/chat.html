@@ -205,6 +205,21 @@
         transform: translateY(-1px);
     }
 
+    .quick-btn.ai-fallback {
+        display: none;
+        background: linear-gradient(135deg, #4e6fff 0%, #3250e9 100%);
+        color: #ffffff;
+    }
+
+    .quick-btn.ai-fallback.show {
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .quick-btn.ai-fallback:hover {
+        background: linear-gradient(135deg, #4e6fff 0%, #3250e9 100%);
+    }
+
     .chat-input-wrap {
         border-top: 1px solid #ececf2;
         background: #ffffff;
@@ -454,6 +469,7 @@
         <div class="typing-status" id="typingStatus">Assistant is typing...</div>
 
         <div class="quick-actions" id="quickActions">
+            <button type="button" class="quick-btn ai-fallback" id="useAiBtn">Use AI Answer</button>
             <button type="button" class="quick-btn" id="askAnotherBtn">Another question</button>
             <button type="button" class="quick-btn" id="openPromptBtn">Prompt list</button>
             <button type="button" class="quick-btn" id="exitBtn">Exit</button>
@@ -498,7 +514,8 @@
 <script>
     window.CHAT_PAGE_STATE = {
         askUrl: window.location.pathname.replace("/chat/", "/ask/"),
-        homeUrl: "{{ url_for('index') }}"
+        homeUrl: "{{ url_for('index') }}",
+        notFoundMessage: "The requested information was not found in the uploaded document."
     };
 </script>
 {% endblock %}
