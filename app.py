@@ -6,7 +6,17 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, flash, g, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 from werkzeug.utils import secure_filename
 
 from utils.qa_engine import (
@@ -17,7 +27,6 @@ from utils.qa_engine import (
     generate_executive_summary_points,
     sanitize_document_text,
 )
-
 
 BASE_DIR = Path(__file__).resolve().parent
 INSTANCE_DIR = BASE_DIR / "instance"
@@ -209,8 +218,9 @@ def build_summary(document_text: str) -> str:
     return build_structured_summary(document_text)
 
 
-def extract_report_data(document_text: str) -> dict:
-    cleaned = sanitize_document_text(document_text or "")
+def extract_report_data(document: dict) -> dict:
+    document_text = document.get("document_text", "") or ""
+    cleaned = sanitize_document_text(document_text)
 
     date_patterns = [
         r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
@@ -226,16 +236,20 @@ def extract_report_data(document_text: str) -> dict:
     amounts = re.findall(r"(?:\$|USD\s*)\d[\d,]*(?:\.\d{2})?", cleaned, flags=re.IGNORECASE)
     action_items = extract_action_items(cleaned)
 
-    preview = cleaned[:1400].strip()
-    if len(cleaned) > 1400:
-        preview += "..."
+    preview_text = document_text[:9000].strip()
+    if len(document_text) > 9000:
+        preview_text += "..."
+
+    is_pdf = str(document.get("file_name", "")).lower().endswith(".pdf")
 
     return {
         "dates": dedupe_keep_order(dates),
         "emails": dedupe_keep_order(emails),
         "amounts": dedupe_keep_order(amounts),
         "action_items": dedupe_keep_order(action_items),
-        "preview": preview,
+        "preview_text": preview_text,
+        "is_pdf": is_pdf,
+        "preview_url": url_for("uploaded_file", filename=document["stored_name"]) if is_pdf else None,
     }
 
 
@@ -335,6 +349,11 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
     return True
 
 
+@app.route("/uploads/<path:filename>")
+def uploaded_file(filename: str):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -397,6 +416,7 @@ def chat(document_id: int):
         "chat.html",
         document=dict(document),
         chat_history=[dict(row) for row in chat_history],
+        api_key_available=bool(OPENAI_API_KEY),
     )
 
 
@@ -416,6 +436,14 @@ def ask(document_id: int):
 
     try:
         if mode == "ai":
+            if not OPENAI_API_KEY:
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "AI fallback is not available right now.",
+                    }
+                ), 400
+
             answer = answer_with_ai_fallback(question, document_text, OPENAI_API_KEY)
 
             updated_existing = append_ai_answer_to_latest_not_found(
@@ -433,10 +461,12 @@ def ask(document_id: int):
                     "answer": answer,
                     "not_found": False,
                     "mode": "ai",
+                    "ai_fallback_available": True,
                 }
             )
 
         answer = answer_question(question, document_text, OPENAI_API_KEY)
+
         insert_chat_history(document_id, question, answer)
 
         return jsonify(
@@ -445,6 +475,7 @@ def ask(document_id: int):
                 "answer": answer,
                 "not_found": answer == NOT_FOUND_MESSAGE,
                 "mode": "document",
+                "ai_fallback_available": bool(OPENAI_API_KEY),
             }
         )
 
@@ -486,7 +517,7 @@ def report(document_id: int):
     document_text = document_dict.get("document_text", "")
 
     structured_summary = build_structured_summary(document_text)
-    report_data = extract_report_data(document_text)
+    report_data = extract_report_data(document_dict)
 
     return render_template(
         "report.html",
