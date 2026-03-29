@@ -1,25 +1,23 @@
 # CA Commercial Support Assistant
 
-An AI-powered Flask application for processing commercial documents and providing intelligent support features such as summarization, document-grounded question answering, key information extraction, and structured report generation.
-
----
+An AI-powered Flask application for processing commercial documents and providing structured support through summarization, document-grounded question answering, extracted insights, and report generation.
 
 ## Features
 
 - Upload **PDF**, **DOCX**, and **TXT** files
-- Extract and clean document text
+- Extract and normalize document text
 - Generate an executive summary
-- Ask document-based questions through a chatbot
+- Ask document-based questions through the chatbot
+- Use optional AI fallback when a direct document answer is not found
 - Extract useful information such as:
   - dates
   - emails
   - amounts
   - action items
 - View a structured report in the browser
-- Download the generated report as a PDF
+- Download the report as a PDF
+- Preview uploaded PDFs page by page inside the report page
 - Store processed documents and chat history using SQLite
-
----
 
 ## Tech Stack
 
@@ -29,11 +27,10 @@ An AI-powered Flask application for processing commercial documents and providin
 - OpenAI API
 - PyPDF2
 - python-docx
+- PyMuPDF
 - reportlab
 - HTML / CSS / JavaScript
 - pytest
-
----
 
 ## Project Structure
 
@@ -44,8 +41,7 @@ ca-commercial-support-assistant/
 ├── config.py
 ├── requirements.txt
 ├── README.md
-├── .gitignore
-├── .env
+├── .env.example
 ├── uploads/
 ├── instance/
 ├── templates/
