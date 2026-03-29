@@ -22,7 +22,6 @@ NOISY_PATTERNS = [
     r"word count\s*\(if applicable\)",
     r"document preview",
     r"document processed",
-    r"executive summary",
     r"assessment title/type",
     r"course/subject",
     r"unit code/description",
@@ -342,8 +341,10 @@ def answer_summary_question(text: str) -> str:
     buckets = [
         ["assignment 2", "frontend design overview", "this assignment requires"],
         ["react", "vue", "modern javascript framework"],
-        ["industry standards", "component architecture", "state management", "ui/ux", "accessibility", "maintainability"],
+        ["component architecture", "state management", "ui/ux", "accessibility", "maintainability"],
+        ["real-world problem", "usable", "scalable", "well-engineered"],
         ["due date", "week 6", "weighting"],
+        ["submit", "repository", "declaration"],
     ]
 
     for terms in buckets:
@@ -351,7 +352,7 @@ def answer_summary_question(text: str) -> str:
         if sentence:
             selected.append(sentence)
 
-    selected = deduplicate_preserving_order(selected)[:4]
+    selected = deduplicate_preserving_order(selected)[:6]
     if not selected:
         return ""
 
@@ -383,13 +384,14 @@ def answer_list_question(text: str) -> str:
         lower = sentence.lower()
         if any(term in lower for term in {
             "must", "should", "submit", "include", "students must",
-            "application must", "feedback", "repository", "declaration"
+            "application must", "feedback", "repository", "declaration",
+            "responsive", "accessible", "state management", "user interaction"
         }):
             cleaned = normalize_whitespace(sentence)
             if len(cleaned) >= 12:
                 items.append(cleaned)
 
-    items = deduplicate_preserving_order(items)[:8]
+    items = deduplicate_preserving_order(items)[:10]
     if not items:
         return ""
 
@@ -443,7 +445,7 @@ def pick_best_sentence(
             if term.lower() in lower:
                 score += 3
 
-        if 40 <= len(sentence) <= 240:
+        if 40 <= len(sentence) <= 260:
             score += 1
 
         if score > 0:
