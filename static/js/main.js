@@ -5,12 +5,15 @@ if (!window.__caChatWidgetInitialized) {
         const state = window.CHAT_PAGE_STATE || {};
         const askUrl = state.askUrl || "";
         const homeUrl = state.homeUrl || "/";
+        const notFoundMessage =
+            state.notFoundMessage || "The requested information was not found in the uploaded document.";
 
         const chatBody = document.getElementById("chatBody");
         const messageInput = document.getElementById("messageInput");
         const sendBtn = document.getElementById("sendBtn");
         const typingStatus = document.getElementById("typingStatus");
         const quickActions = document.getElementById("quickActions");
+        const useAiBtn = document.getElementById("useAiBtn");
 
         const promptModal = document.getElementById("promptModal");
         const openPromptBtn = document.getElementById("openPromptBtn");
@@ -25,6 +28,7 @@ if (!window.__caChatWidgetInitialized) {
         let requestInFlight = false;
         let lastSubmittedQuestion = "";
         let lastSubmittedAt = 0;
+        let lastNotFoundQuestion = "";
 
         function scrollToBottom() {
             if (chatBody) {
@@ -48,6 +52,16 @@ if (!window.__caChatWidgetInitialized) {
         function showQuickActions(show) {
             if (!quickActions) return;
             quickActions.classList.toggle("show", !!show);
+        }
+
+        function showUseAiButton(show) {
+            if (!useAiBtn) return;
+            useAiBtn.classList.toggle("show", !!show);
+        }
+
+        function clearAiFallbackState() {
+            lastNotFoundQuestion = "";
+            showUseAiButton(false);
         }
 
         function createBubble(role, text) {
@@ -110,15 +124,22 @@ if (!window.__caChatWidgetInitialized) {
             lastSubmittedAt = Date.now();
         }
 
-        async function askQuestion(question) {
+        async function askQuestion(question, options = {}) {
             const trimmed = (question || "").trim();
+            const mode = options.mode === "ai" ? "ai" : "document";
+            const echoUser = options.echoUser !== false;
+
             if (!trimmed) return;
 
             if (requestInFlight) return;
-            if (isDuplicateSubmission(trimmed)) return;
+            if (mode === "document" && isDuplicateSubmission(trimmed)) return;
 
             requestInFlight = true;
-            markSubmission(trimmed);
+
+            if (mode === "document") {
+                markSubmission(trimmed);
+                clearAiFallbackState();
+            }
 
             if (!askUrl) {
                 appendMessage("assistant", "The chatbot endpoint is not configured correctly.");
@@ -126,7 +147,9 @@ if (!window.__caChatWidgetInitialized) {
                 return;
             }
 
-            appendMessage("user", trimmed);
+            if (echoUser) {
+                appendMessage("user", trimmed);
+            }
 
             if (messageInput) {
                 messageInput.value = "";
@@ -140,6 +163,7 @@ if (!window.__caChatWidgetInitialized) {
             try {
                 const formData = new FormData();
                 formData.append("question", trimmed);
+                formData.append("mode", mode);
 
                 const response = await fetch(askUrl, {
                     method: "POST",
@@ -153,13 +177,28 @@ if (!window.__caChatWidgetInitialized) {
 
                 if (!response.ok || !data.success) {
                     appendMessage("assistant", data.message || "The chatbot could not answer right now.");
+                    clearAiFallbackState();
                     return;
                 }
 
-                appendMessage("assistant", data.answer || "No answer returned.");
+                const answerText = data.answer || "No answer returned.";
+                appendMessage("assistant", answerText);
+
+                const isNotFound =
+                    mode === "document" &&
+                    (data.not_found === true || answerText.trim() === notFoundMessage);
+
+                if (isNotFound) {
+                    lastNotFoundQuestion = trimmed;
+                    showUseAiButton(true);
+                } else {
+                    clearAiFallbackState();
+                }
+
                 showQuickActions(true);
             } catch (error) {
                 appendMessage("assistant", "A network or server error occurred. Please try again.");
+                clearAiFallbackState();
             } finally {
                 showTyping(false);
                 setBusy(false);
@@ -177,7 +216,7 @@ if (!window.__caChatWidgetInitialized) {
                     event.stopPropagation();
 
                     const question = btn.getAttribute("data-question") || "";
-                    askQuestion(question);
+                    askQuestion(question, { mode: "document", echoUser: true });
                 });
             });
         }
@@ -186,7 +225,7 @@ if (!window.__caChatWidgetInitialized) {
             sendBtn.dataset.bound = "1";
             sendBtn.addEventListener("click", function (event) {
                 event.preventDefault();
-                askQuestion(messageInput ? messageInput.value : "");
+                askQuestion(messageInput ? messageInput.value : "", { mode: "document", echoUser: true });
             });
         }
 
@@ -195,8 +234,16 @@ if (!window.__caChatWidgetInitialized) {
             messageInput.addEventListener("keydown", function (event) {
                 if (event.key === "Enter") {
                     event.preventDefault();
-                    askQuestion(messageInput.value);
+                    askQuestion(messageInput.value, { mode: "document", echoUser: true });
                 }
+            });
+        }
+
+        if (useAiBtn && useAiBtn.dataset.bound !== "1") {
+            useAiBtn.dataset.bound = "1";
+            useAiBtn.addEventListener("click", function () {
+                if (!lastNotFoundQuestion) return;
+                askQuestion(lastNotFoundQuestion, { mode: "ai", echoUser: false });
             });
         }
 
