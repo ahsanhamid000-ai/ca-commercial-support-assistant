@@ -1,62 +1,145 @@
-document.addEventListener("DOMContentLoaded", () => {
-    const chatForm = document.getElementById("chat-form");
-    if (!chatForm) return;
+document.addEventListener("DOMContentLoaded", function () {
+    const questionModal = document.getElementById("questionModal");
+    const nextStepModal = document.getElementById("nextStepModal");
+    const presetQuestionForm = document.getElementById("presetQuestionForm");
+    const presetQuestionInput = document.getElementById("presetQuestionInput");
+    const customQuestionBox = document.getElementById("customQuestionBox");
+    const chatHistory = document.getElementById("chatHistory");
+    const exitForm = document.getElementById("exitForm");
 
-    const chatHistory = document.getElementById("chat-history");
-    const chatStatus = document.getElementById("chat-status");
-    const sendButton = document.getElementById("send-button");
-    const questionInput = document.getElementById("question");
+    const openQuestionModalBtn = document.getElementById("openQuestionModalBtn");
+    const showCustomBoxBtn = document.getElementById("showCustomBoxBtn");
+    const hideCustomBoxBtn = document.getElementById("hideCustomBoxBtn");
+    const openCustomFromModalBtn = document.getElementById("openCustomFromModalBtn");
+    const modalExitBtn = document.getElementById("modalExitBtn");
+    const askAnotherBtn = document.getElementById("askAnotherBtn");
+    const askCustomAfterAnswerBtn = document.getElementById("askCustomAfterAnswerBtn");
+    const nextStepExitBtn = document.getElementById("nextStepExitBtn");
 
-    function appendMessage(role, text) {
-        const wrapper = document.createElement("div");
-        wrapper.className = `chat-message ${role}`;
+    const presetButtons = document.querySelectorAll(".preset-question-btn");
+    const showNextStep = window.CHAT_PAGE_STATE && window.CHAT_PAGE_STATE.showNextStep === 1;
 
-        const strong = document.createElement("strong");
-        strong.textContent = role === "user" ? "You:" : "Assistant:";
+    function openModal(modal) {
+        if (modal) {
+            modal.classList.add("show");
+        }
+    }
 
-        wrapper.appendChild(strong);
-        wrapper.appendChild(document.createTextNode(" " + text));
-        chatHistory.appendChild(wrapper);
+    function closeModal(modal) {
+        if (modal) {
+            modal.classList.remove("show");
+        }
+    }
+
+    function showCustomQuestionBox() {
+        closeModal(questionModal);
+        closeModal(nextStepModal);
+
+        if (customQuestionBox) {
+            customQuestionBox.classList.add("active");
+            const textarea = customQuestionBox.querySelector("textarea");
+            if (textarea) {
+                textarea.focus();
+            }
+        }
+    }
+
+    function hideCustomQuestionBox() {
+        if (customQuestionBox) {
+            customQuestionBox.classList.remove("active");
+        }
+    }
+
+    function submitPresetQuestion(questionText) {
+        if (!presetQuestionInput || !presetQuestionForm) return;
+        presetQuestionInput.value = questionText;
+        presetQuestionForm.submit();
+    }
+
+    function exitChat() {
+        if (exitForm) {
+            exitForm.requestSubmit();
+        }
+    }
+
+    if (chatHistory) {
         chatHistory.scrollTop = chatHistory.scrollHeight;
     }
 
-    chatForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        const question = questionInput.value.trim();
-        if (!question) return;
-
-        const formData = new FormData(chatForm);
-
-        sendButton.disabled = true;
-        chatStatus.style.display = "block";
-
-        appendMessage("user", question);
-
-        try {
-            const response = await fetch(chatForm.action, {
-                method: "POST",
-                body: formData
+    if (presetButtons.length > 0) {
+        presetButtons.forEach((btn) => {
+            btn.addEventListener("click", function () {
+                const question = btn.getAttribute("data-question") || "";
+                submitPresetQuestion(question);
             });
+        });
+    }
 
-            const data = await response.json();
+    if (openQuestionModalBtn) {
+        openQuestionModalBtn.addEventListener("click", function () {
+            hideCustomQuestionBox();
+            closeModal(nextStepModal);
+            openModal(questionModal);
+        });
+    }
 
-            if (!response.ok || !data.success) {
-                appendMessage("assistant", data.message || "Something went wrong.");
-            } else {
-                appendMessage("assistant", data.answer);
+    if (showCustomBoxBtn) {
+        showCustomBoxBtn.addEventListener("click", function () {
+            showCustomQuestionBox();
+        });
+    }
+
+    if (hideCustomBoxBtn) {
+        hideCustomBoxBtn.addEventListener("click", function () {
+            hideCustomQuestionBox();
+        });
+    }
+
+    if (openCustomFromModalBtn) {
+        openCustomFromModalBtn.addEventListener("click", function () {
+            showCustomQuestionBox();
+        });
+    }
+
+    if (modalExitBtn) {
+        modalExitBtn.addEventListener("click", function () {
+            exitChat();
+        });
+    }
+
+    if (askAnotherBtn) {
+        askAnotherBtn.addEventListener("click", function () {
+            closeModal(nextStepModal);
+            hideCustomQuestionBox();
+            openModal(questionModal);
+        });
+    }
+
+    if (askCustomAfterAnswerBtn) {
+        askCustomAfterAnswerBtn.addEventListener("click", function () {
+            showCustomQuestionBox();
+        });
+    }
+
+    if (nextStepExitBtn) {
+        nextStepExitBtn.addEventListener("click", function () {
+            exitChat();
+        });
+    }
+
+    if (showNextStep) {
+        openModal(nextStepModal);
+    } else {
+        openModal(questionModal);
+    }
+
+    [questionModal, nextStepModal].forEach((modal) => {
+        if (!modal) return;
+
+        modal.addEventListener("click", function (event) {
+            if (event.target === modal) {
+                closeModal(modal);
             }
-
-            questionInput.value = "";
-        } catch (error) {
-            appendMessage(
-                "assistant",
-                "The chatbot is temporarily unavailable. Please try again."
-            );
-        } finally {
-            sendButton.disabled = false;
-            chatStatus.style.display = "none";
-            questionInput.focus();
-        }
+        });
     });
 });
