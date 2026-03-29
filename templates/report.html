@@ -1,65 +1,264 @@
 {% extends "base.html" %}
 
-{% block title %}Generated Report{% endblock %}
+{% block title %}Structured Report - CA Commercial Support Assistant{% endblock %}
 
 {% block content %}
-<section class="card">
-    <h2>Structured Report</h2>
-    <p><strong>Document:</strong> {{ report.document_name }}</p>
-    <p><strong>Type:</strong> {{ report.document_type|upper }}</p>
-</section>
+<style>
+    body {
+        background: #f4f5f8;
+    }
 
-<section class="actions">
-    <a class="button secondary" href="{{ url_for('download_report', doc_id=document.id) }}">
-        Download PDF Report
-    </a>
-</section>
+    main.container {
+        width: 100%;
+        max-width: 100%;
+    }
 
-<section class="card">
-    <h3>Summary</h3>
-    <p>{{ report.summary }}</p>
-</section>
+    .report-page {
+        width: 100%;
+        max-width: 1180px;
+        margin: 28px auto 40px;
+        padding: 0 24px;
+    }
 
-<section class="card">
-    <h3>Dates</h3>
-    <ul>
-        {% for item in report.dates %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>No dates found.</li>
-        {% endfor %}
-    </ul>
+    .report-card {
+        background: #ffffff;
+        border-radius: 24px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+        padding: 30px 28px;
+        margin-bottom: 22px;
+    }
 
-    <h3>Emails</h3>
-    <ul>
-        {% for item in report.emails %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>No emails found.</li>
-        {% endfor %}
-    </ul>
+    .report-title {
+        margin: 0 0 16px;
+        font-size: 34px;
+        font-weight: 800;
+        color: #1f2a44;
+    }
 
-    <h3>Amounts</h3>
-    <ul>
-        {% for item in report.amounts %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>No amounts found.</li>
-        {% endfor %}
-    </ul>
+    .meta-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+    }
 
-    <h3>Action Items</h3>
-    <ul>
-        {% for item in report.action_items %}
-            <li>{{ item }}</li>
-        {% else %}
-            <li>No action items found.</li>
-        {% endfor %}
-    </ul>
-</section>
+    .meta-box {
+        background: #f7f9ff;
+        border: 1px solid #dbe4f3;
+        border-radius: 18px;
+        padding: 18px;
+    }
 
-<section class="card">
-    <h3>Document Preview</h3>
-    <p>{{ report.preview }}</p>
-</section>
+    .meta-label {
+        font-size: 12px;
+        font-weight: 800;
+        color: #51638f;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+    }
+
+    .meta-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: #111827;
+        word-break: break-word;
+    }
+
+    .section-title {
+        margin: 0 0 14px;
+        font-size: 22px;
+        font-weight: 800;
+        color: #1f2a44;
+    }
+
+    .summary-text,
+    .preview-text {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.8;
+        color: #374151;
+        white-space: pre-line;
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+    }
+
+    .info-box {
+        background: #f9fafc;
+        border: 1px solid #dbe4f3;
+        border-radius: 18px;
+        padding: 20px;
+    }
+
+    .info-box.full {
+        grid-column: 1 / -1;
+    }
+
+    .mini-title {
+        margin: 0 0 12px;
+        font-size: 18px;
+        font-weight: 800;
+        color: #1f2a44;
+    }
+
+    .info-box ul {
+        margin: 0;
+        padding-left: 20px;
+        color: #374151;
+        line-height: 1.8;
+    }
+
+    .empty-text {
+        margin: 0;
+        color: #6b7280;
+        font-size: 15px;
+    }
+
+    .action-row {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 14px;
+        padding: 13px 20px;
+        font-size: 15px;
+        font-weight: 700;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.18s ease;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #2d4680 0%, #284170 100%);
+        color: #ffffff;
+    }
+
+    .btn-secondary {
+        background: #e7ebfb;
+        color: #284170;
+    }
+
+    .btn:hover {
+        transform: translateY(-1px);
+    }
+
+    @media (max-width: 820px) {
+        .meta-row,
+        .info-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .report-title {
+            font-size: 28px;
+        }
+
+        .report-card {
+            padding: 24px 18px;
+        }
+    }
+</style>
+
+<div class="report-page">
+    <div class="report-card">
+        <h1 class="report-title">Structured Report</h1>
+
+        <div class="meta-row">
+            <div class="meta-box">
+                <div class="meta-label">Document</div>
+                <div class="meta-value">{{ document.file_name }}</div>
+            </div>
+
+            <div class="meta-box">
+                <div class="meta-label">Type</div>
+                <div class="meta-value">
+                    {{ document.file_name.split('.')[-1].upper() if document.file_name and '.' in document.file_name else 'Document' }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="report-card">
+        <h2 class="section-title">Summary</h2>
+        <p class="summary-text">{{ structured_summary }}</p>
+    </div>
+
+    <div class="report-card">
+        <h2 class="section-title">Extracted Information</h2>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <h3 class="mini-title">Dates</h3>
+                {% if report_data.dates %}
+                    <ul>
+                        {% for item in report_data.dates %}
+                            <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-text">No dates found.</p>
+                {% endif %}
+            </div>
+
+            <div class="info-box">
+                <h3 class="mini-title">Emails</h3>
+                {% if report_data.emails %}
+                    <ul>
+                        {% for item in report_data.emails %}
+                            <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-text">No emails found.</p>
+                {% endif %}
+            </div>
+
+            <div class="info-box">
+                <h3 class="mini-title">Amounts</h3>
+                {% if report_data.amounts %}
+                    <ul>
+                        {% for item in report_data.amounts %}
+                            <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-text">No amounts found.</p>
+                {% endif %}
+            </div>
+
+            <div class="info-box">
+                <h3 class="mini-title">Action Items</h3>
+                {% if report_data.action_items %}
+                    <ul>
+                        {% for item in report_data.action_items %}
+                            <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-text">No action items found.</p>
+                {% endif %}
+            </div>
+
+            <div class="info-box full">
+                <h3 class="mini-title">Document Preview</h3>
+                <p class="preview-text">{{ report_data.preview }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="report-card">
+        <div class="action-row">
+            <a href="{{ url_for('result', document_id=document.id) }}" class="btn btn-secondary">Back</a>
+            <a href="{{ url_for('chat', document_id=document.id) }}" class="btn btn-primary">Use Chatbot</a>
+        </div>
+    </div>
+</div>
 {% endblock %}
