@@ -13,11 +13,10 @@ from flask import (
     flash,
     g,
     jsonify,
-    make_response,
     redirect,
     render_template,
     request,
-    send_from_directory,
+    send_file,
     url_for,
 )
 from werkzeug.utils import secure_filename
@@ -221,6 +220,32 @@ def build_summary(document_text: str) -> str:
     return build_structured_summary(document_text)
 
 
+def build_inline_file_response(file_path: Path):
+    if not file_path.exists() or not file_path.is_file():
+        abort(404)
+
+    guessed_type, _ = mimetypes.guess_type(str(file_path))
+    mime_type = guessed_type or "application/octet-stream"
+
+    response = send_file(
+        file_path,
+        mimetype=mime_type,
+        as_attachment=False,
+        conditional=True,
+        download_name=file_path.name,
+    )
+
+    response.headers["Content-Disposition"] = f'inline; filename="{file_path.name}"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+
+    if file_path.suffix.lower() == ".pdf":
+        response.headers["Content-Type"] = "application/pdf"
+
+    return response
+
+
 def extract_report_data(document: dict) -> dict:
     document_text = document.get("document_text", "") or ""
     cleaned = sanitize_document_text(document_text)
@@ -252,7 +277,7 @@ def extract_report_data(document: dict) -> dict:
         "action_items": dedupe_keep_order(action_items),
         "preview_text": preview_text,
         "is_pdf": is_pdf,
-        "preview_url": url_for("uploaded_file", filename=document["stored_name"]) if is_pdf else None,
+        "preview_url": url_for("preview_file", filename=document["stored_name"]) if is_pdf else None,
     }
 
 
@@ -352,31 +377,16 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
     return True
 
 
+@app.route("/preview/<path:filename>")
+def preview_file(filename: str):
+    file_path = Path(app.config["UPLOAD_FOLDER"]) / filename
+    return build_inline_file_response(file_path)
+
+
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename: str):
     file_path = Path(app.config["UPLOAD_FOLDER"]) / filename
-
-    if not file_path.exists():
-        abort(404)
-
-    guessed_type, _ = mimetypes.guess_type(str(file_path))
-    mime_type = guessed_type or "application/octet-stream"
-
-    response = make_response(
-        send_from_directory(
-            app.config["UPLOAD_FOLDER"],
-            filename,
-            as_attachment=False,
-            mimetype=mime_type,
-        )
-    )
-
-    if filename.lower().endswith(".pdf"):
-        response.headers["Content-Type"] = "application/pdf"
-        response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
-        response.headers["X-Content-Type-Options"] = "nosniff"
-
-    return response
+    return build_inline_file_response(file_path)
 
 
 @app.route("/", methods=["GET", "POST"])
