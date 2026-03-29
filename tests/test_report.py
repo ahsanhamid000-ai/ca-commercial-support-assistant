@@ -6,13 +6,7 @@ def test_build_report_data():
         "file_name": "sample.pdf",
         "file_type": "pdf",
         "summary": "Sample summary",
-        "cleaned_text": "This is a cleaned text preview.",
-        "extracted_info": {
-            "dates": ["2026-03-15"],
-            "emails": ["test@example.com"],
-            "amounts": ["$1000"],
-            "action_items": ["Submit the invoice."]
-        }
+        "document_text": "Payment deadline is 2026-03-15. Contact test@example.com. Amount is $1000.",
     }
 
     report = build_report_data(document)
@@ -20,7 +14,9 @@ def test_build_report_data():
     assert report["document_name"] == "sample.pdf"
     assert report["summary"] == "Sample summary"
     assert "2026-03-15" in report["dates"]
-    assert "preview" in report
+    assert "test@example.com" in report["emails"]
+    assert "$1000" in report["amounts"]
+    assert "preview_text" in report
 
 
 def test_build_report_pdf_returns_bytes():
@@ -32,7 +28,7 @@ def test_build_report_pdf_returns_bytes():
         "emails": ["test@example.com"],
         "amounts": ["$1000"],
         "action_items": ["Submit the invoice."],
-        "preview": "This is the preview section."
+        "preview_text": "This is the preview section."
     }
 
     pdf_buffer = build_report_pdf(report)
