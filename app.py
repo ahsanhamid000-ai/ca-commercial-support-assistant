@@ -387,7 +387,7 @@ def handle_upload_request():
         )
 
         flash("Document uploaded successfully.", "success")
-        return redirect(url_for("chat", document_id=document_id))
+        return redirect(url_for("result", document_id=document_id))
 
     except Exception as exc:
         logger.exception("Upload failed: %s", exc)
