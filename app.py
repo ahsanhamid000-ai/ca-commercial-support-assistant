@@ -1,5 +1,4 @@
 import logging
-import mimetypes
 import os
 import re
 import sqlite3
@@ -220,30 +219,17 @@ def build_summary(document_text: str) -> str:
     return build_structured_summary(document_text)
 
 
-def build_inline_file_response(file_path: Path):
-    if not file_path.exists() or not file_path.is_file():
+def get_safe_upload_path(filename: str) -> Path:
+    requested_path = (UPLOAD_FOLDER / filename).resolve()
+    uploads_root = UPLOAD_FOLDER.resolve()
+
+    if uploads_root not in requested_path.parents and requested_path != uploads_root:
         abort(404)
 
-    guessed_type, _ = mimetypes.guess_type(str(file_path))
-    mime_type = guessed_type or "application/octet-stream"
+    if not requested_path.exists() or not requested_path.is_file():
+        abort(404)
 
-    response = send_file(
-        file_path,
-        mimetype=mime_type,
-        as_attachment=False,
-        conditional=True,
-        download_name=file_path.name,
-    )
-
-    response.headers["Content-Disposition"] = f'inline; filename="{file_path.name}"'
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-
-    if file_path.suffix.lower() == ".pdf":
-        response.headers["Content-Type"] = "application/pdf"
-
-    return response
+    return requested_path
 
 
 def extract_report_data(document: dict) -> dict:
@@ -277,7 +263,7 @@ def extract_report_data(document: dict) -> dict:
         "action_items": dedupe_keep_order(action_items),
         "preview_text": preview_text,
         "is_pdf": is_pdf,
-        "preview_url": url_for("preview_file", filename=document["stored_name"]) if is_pdf else None,
+        "pdf_data_url": url_for("preview_pdf", filename=document["stored_name"]) if is_pdf else None,
     }
 
 
@@ -378,15 +364,32 @@ def append_ai_answer_to_latest_not_found(document_id: int, question: str, ai_ans
 
 
 @app.route("/preview/<path:filename>")
-def preview_file(filename: str):
-    file_path = Path(app.config["UPLOAD_FOLDER"]) / filename
-    return build_inline_file_response(file_path)
+def preview_pdf(filename: str):
+    file_path = get_safe_upload_path(filename)
+
+    if file_path.suffix.lower() != ".pdf":
+        abort(404)
+
+    response = send_file(
+        file_path,
+        mimetype="application/pdf",
+        as_attachment=False,
+        conditional=True,
+        download_name=file_path.name,
+        max_age=0,
+    )
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = f'inline; filename="{file_path.name}"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename: str):
-    file_path = Path(app.config["UPLOAD_FOLDER"]) / filename
-    return build_inline_file_response(file_path)
+    file_path = get_safe_upload_path(filename)
+    return send_file(file_path, as_attachment=False, conditional=True, download_name=file_path.name)
 
 
 @app.route("/", methods=["GET", "POST"])
