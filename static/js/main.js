@@ -19,6 +19,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const presetButtons = document.querySelectorAll(".preset-question-btn");
 
+    let requestInFlight = false;
+
     function scrollToBottom() {
         if (chatBody) {
             chatBody.scrollTop = chatBody.scrollHeight;
@@ -93,14 +95,18 @@ document.addEventListener("DOMContentLoaded", function () {
 
     async function askQuestion(question) {
         const trimmed = (question || "").trim();
-        if (!trimmed) return;
+        if (!trimmed || requestInFlight) return;
+
+        requestInFlight = true;
 
         if (!askUrl) {
             appendMessage("assistant", "The chatbot endpoint is not configured correctly.");
+            requestInFlight = false;
             return;
         }
 
         appendMessage("user", trimmed);
+
         if (messageInput) {
             messageInput.value = "";
         }
@@ -136,12 +142,14 @@ document.addEventListener("DOMContentLoaded", function () {
         } finally {
             showTyping(false);
             setBusy(false);
+            requestInFlight = false;
         }
     }
 
     if (presetButtons.length > 0) {
         presetButtons.forEach((btn) => {
             btn.addEventListener("click", function () {
+                if (requestInFlight) return;
                 const question = btn.getAttribute("data-question") || "";
                 askQuestion(question);
             });
