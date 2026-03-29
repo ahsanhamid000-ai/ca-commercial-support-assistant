@@ -3,25 +3,27 @@ document.addEventListener("DOMContentLoaded", function () {
     const askUrl = state.askUrl || "";
     const homeUrl = state.homeUrl || "/";
 
-    const questionModal = document.getElementById("questionModal");
-    const nextStepModal = document.getElementById("nextStepModal");
-    const customQuestionBox = document.getElementById("customQuestionBox");
-    const chatHistory = document.getElementById("chatHistory");
-    const statusText = document.getElementById("statusText");
+    const chatBody = document.getElementById("chatBody");
+    const messageInput = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const typingStatus = document.getElementById("typingStatus");
+    const quickActions = document.getElementById("quickActions");
 
-    const openQuestionModalBtn = document.getElementById("openQuestionModalBtn");
-    const showCustomBoxBtn = document.getElementById("showCustomBoxBtn");
-    const hideCustomBoxBtn = document.getElementById("hideCustomBoxBtn");
-    const openCustomFromModalBtn = document.getElementById("openCustomFromModalBtn");
+    const promptModal = document.getElementById("promptModal");
+    const openPromptBtn = document.getElementById("openPromptBtn");
+    const openPromptFromInputBtn = document.getElementById("openPromptFromInputBtn");
+    const closePromptModalBtn = document.getElementById("closePromptModalBtn");
     const modalExitBtn = document.getElementById("modalExitBtn");
     const exitBtn = document.getElementById("exitBtn");
     const askAnotherBtn = document.getElementById("askAnotherBtn");
-    const askCustomAfterAnswerBtn = document.getElementById("askCustomAfterAnswerBtn");
-    const nextStepExitBtn = document.getElementById("nextStepExitBtn");
-    const submitCustomQuestionBtn = document.getElementById("submitCustomQuestionBtn");
 
-    const questionInput = document.getElementById("questionInput");
     const presetButtons = document.querySelectorAll(".preset-question-btn");
+
+    function scrollToBottom() {
+        if (chatBody) {
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+    }
 
     function openModal(modal) {
         if (modal) modal.classList.add("show");
@@ -31,37 +33,57 @@ document.addEventListener("DOMContentLoaded", function () {
         if (modal) modal.classList.remove("show");
     }
 
-    function showStatus(message) {
-        if (!statusText) return;
-        statusText.textContent = message;
-        statusText.classList.add("show");
+    function showTyping(show) {
+        if (!typingStatus) return;
+        typingStatus.classList.toggle("show", !!show);
     }
 
-    function hideStatus() {
-        if (!statusText) return;
-        statusText.classList.remove("show");
+    function showQuickActions(show) {
+        if (!quickActions) return;
+        quickActions.classList.toggle("show", !!show);
     }
 
-    function showCustomQuestionBox() {
-        closeModal(questionModal);
-        closeModal(nextStepModal);
+    function createBubble(role, text) {
+        const row = document.createElement("div");
+        row.className = `bubble-row ${role}`;
 
-        if (customQuestionBox) {
-            customQuestionBox.classList.add("active");
-        }
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${role}`;
 
-        if (questionInput) {
-            questionInput.focus();
-        }
+        const label = document.createElement("div");
+        label.className = "bubble-label";
+        label.textContent = role === "user" ? "You" : "Assistant";
+
+        const body = document.createElement("div");
+        body.textContent = text;
+
+        bubble.appendChild(label);
+        bubble.appendChild(body);
+        row.appendChild(bubble);
+
+        return row;
     }
 
-    function hideCustomQuestionBox() {
-        if (customQuestionBox) {
-            customQuestionBox.classList.remove("active");
+    function appendMessage(role, text) {
+        if (!chatBody) return;
+
+        const initial = document.getElementById("initialBotBubble");
+        if (initial) {
+            initial.remove();
         }
 
-        if (questionInput) {
-            questionInput.value = "";
+        chatBody.appendChild(createBubble(role, text));
+        scrollToBottom();
+    }
+
+    function setBusy(isBusy) {
+        const buttons = document.querySelectorAll("button");
+        buttons.forEach((btn) => {
+            btn.disabled = isBusy;
+        });
+
+        if (messageInput) {
+            messageInput.disabled = isBusy;
         }
     }
 
@@ -69,64 +91,28 @@ document.addEventListener("DOMContentLoaded", function () {
         window.location.href = homeUrl;
     }
 
-    function scrollHistoryToBottom() {
-        if (chatHistory) {
-            chatHistory.scrollTop = chatHistory.scrollHeight;
-        }
-    }
-
-    function createMessageBubble(role, text) {
-        const wrapper = document.createElement("div");
-        wrapper.className = `message ${role}`;
-
-        const meta = document.createElement("div");
-        meta.className = "message-meta";
-
-        const label = document.createElement("strong");
-        label.textContent = role === "user" ? "You:" : "Assistant:";
-        meta.appendChild(label);
-
-        const body = document.createElement("div");
-        body.textContent = text;
-
-        wrapper.appendChild(meta);
-        wrapper.appendChild(body);
-
-        return wrapper;
-    }
-
-    function appendConversation(question, answer) {
-        if (!chatHistory) return;
-
-        const initialMessage = document.getElementById("initialAssistantMessage");
-        if (initialMessage) {
-            initialMessage.remove();
-        }
-
-        chatHistory.appendChild(createMessageBubble("user", question));
-        chatHistory.appendChild(createMessageBubble("assistant", answer));
-        scrollHistoryToBottom();
-    }
-
-    function setButtonsDisabled(disabled) {
-        const allButtons = document.querySelectorAll("button");
-        allButtons.forEach((button) => {
-            button.disabled = disabled;
-        });
-    }
-
     async function askQuestion(question) {
+        const trimmed = (question || "").trim();
+        if (!trimmed) return;
+
         if (!askUrl) {
-            appendConversation(question, "The chatbot endpoint is not configured correctly.");
+            appendMessage("assistant", "The chatbot endpoint is not configured correctly.");
             return;
         }
 
-        showStatus("Processing your question...");
-        setButtonsDisabled(true);
+        appendMessage("user", trimmed);
+        if (messageInput) {
+            messageInput.value = "";
+        }
+
+        closeModal(promptModal);
+        showQuickActions(false);
+        showTyping(true);
+        setBusy(true);
 
         try {
             const formData = new FormData();
-            formData.append("question", question);
+            formData.append("question", trimmed);
 
             const response = await fetch(askUrl, {
                 method: "POST",
@@ -139,83 +125,59 @@ document.addEventListener("DOMContentLoaded", function () {
             const data = await response.json();
 
             if (!response.ok || !data.success) {
-                const errorMessage = data.message || "The chatbot could not answer right now.";
-                appendConversation(question, errorMessage);
-                closeModal(questionModal);
-                closeModal(nextStepModal);
+                appendMessage("assistant", data.message || "The chatbot could not answer right now.");
                 return;
             }
 
-            appendConversation(
-                data.question || question,
-                data.answer || "No answer returned."
-            );
-
-            hideCustomQuestionBox();
-            closeModal(questionModal);
-            openModal(nextStepModal);
+            appendMessage("assistant", data.answer || "No answer returned.");
+            showQuickActions(true);
         } catch (error) {
-            appendConversation(question, "A network or server error occurred. Please try again.");
-            closeModal(questionModal);
-            closeModal(nextStepModal);
+            appendMessage("assistant", "A network or server error occurred. Please try again.");
         } finally {
-            hideStatus();
-            setButtonsDisabled(false);
+            showTyping(false);
+            setBusy(false);
         }
-    }
-
-    if (chatHistory) {
-        scrollHistoryToBottom();
     }
 
     if (presetButtons.length > 0) {
         presetButtons.forEach((btn) => {
             btn.addEventListener("click", function () {
                 const question = btn.getAttribute("data-question") || "";
-                if (question.trim()) {
-                    askQuestion(question);
-                }
+                askQuestion(question);
             });
         });
     }
 
-    if (submitCustomQuestionBtn) {
-        submitCustomQuestionBtn.addEventListener("click", function () {
-            const question = (questionInput && questionInput.value ? questionInput.value : "").trim();
+    if (sendBtn) {
+        sendBtn.addEventListener("click", function () {
+            askQuestion(messageInput ? messageInput.value : "");
+        });
+    }
 
-            if (!question) {
-                showStatus("Please type a custom question first.");
-                setTimeout(hideStatus, 1800);
-                return;
+    if (messageInput) {
+        messageInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                askQuestion(messageInput.value);
             }
-
-            askQuestion(question);
         });
     }
 
-    if (openQuestionModalBtn) {
-        openQuestionModalBtn.addEventListener("click", function () {
-            hideCustomQuestionBox();
-            closeModal(nextStepModal);
-            openModal(questionModal);
+    if (openPromptBtn) {
+        openPromptBtn.addEventListener("click", function () {
+            openModal(promptModal);
         });
     }
 
-    if (showCustomBoxBtn) {
-        showCustomBoxBtn.addEventListener("click", function () {
-            showCustomQuestionBox();
+    if (openPromptFromInputBtn) {
+        openPromptFromInputBtn.addEventListener("click", function () {
+            openModal(promptModal);
         });
     }
 
-    if (hideCustomBoxBtn) {
-        hideCustomBoxBtn.addEventListener("click", function () {
-            hideCustomQuestionBox();
-        });
-    }
-
-    if (openCustomFromModalBtn) {
-        openCustomFromModalBtn.addEventListener("click", function () {
-            showCustomQuestionBox();
+    if (closePromptModalBtn) {
+        closePromptModalBtn.addEventListener("click", function () {
+            closeModal(promptModal);
         });
     }
 
@@ -233,44 +195,18 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (askAnotherBtn) {
         askAnotherBtn.addEventListener("click", function () {
-            closeModal(nextStepModal);
-            hideCustomQuestionBox();
-            openModal(questionModal);
+            openModal(promptModal);
         });
     }
 
-    if (askCustomAfterAnswerBtn) {
-        askCustomAfterAnswerBtn.addEventListener("click", function () {
-            showCustomQuestionBox();
-        });
-    }
-
-    if (nextStepExitBtn) {
-        nextStepExitBtn.addEventListener("click", function () {
-            exitChat();
-        });
-    }
-
-    [questionModal, nextStepModal].forEach((modal) => {
-        if (!modal) return;
-
-        modal.addEventListener("click", function (event) {
-            if (event.target === modal) {
-                closeModal(modal);
-            }
-        });
-    });
-
-    if (questionInput) {
-        questionInput.addEventListener("keydown", function (event) {
-            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                event.preventDefault();
-                if (submitCustomQuestionBtn) {
-                    submitCustomQuestionBtn.click();
-                }
+    if (promptModal) {
+        promptModal.addEventListener("click", function (event) {
+            if (event.target === promptModal) {
+                closeModal(promptModal);
             }
         });
     }
 
-    openModal(questionModal);
+    scrollToBottom();
+    openModal(promptModal);
 });
